@@ -6,6 +6,14 @@ internal v2 V2(f32 x, f32 y) {
     return result;
 }
 
+internal v2 V2(sfVector2u v) {
+    v2 result;
+    result.x = cast(f32) v.x;
+    result.y = cast(f32) v.y;
+
+    return result;
+}
+
 inline v2 operator+(v2 a, v2 b) {
     v2 result;
     result.x = a.x + b.x;

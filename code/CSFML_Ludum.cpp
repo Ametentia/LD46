@@ -3,10 +3,10 @@
 #include <SFML/Audio.H>
 
 #include <stdio.h>
+#include <stdlib.h>
 
-#include "Ludum_Types.h"
-#include "Ludum_Maths.h"
-
+#include "Ludum.h"
+#include "Ludum.cpp"
 
 global sfRenderWindow *global_window;
 global sfView *global_view;
@@ -43,17 +43,23 @@ internal void CSFMLHandleInputs(Game_Input *current_input, Game_Input *prev_inpu
     Game_Controller *current_keyboard = &current_input->controllers[0];
     Game_Controller *prev_keyboard    = &prev_input->controllers[0];
 
+    CSFMLProcessGameButton(&current_keyboard->move_left, &prev_keyboard->move_left, sfKeyboard_isKeyPressed(sfKeyA));
+    CSFMLProcessGameButton(&current_keyboard->move_right, &prev_keyboard->move_right, sfKeyboard_isKeyPressed(sfKeyD));
     CSFMLProcessGameButton(&current_keyboard->menu, &prev_keyboard->menu, sfKeyboard_isKeyPressed(sfKeyEscape));
     CSFMLProcessGameButton(&current_keyboard->interact, &prev_keyboard->interact, sfKeyboard_isKeyPressed(sfKeyE));
 }
 
-#if WIN_LUDUM
+#if LUDUM_WINDOWS
 #include <windows.h>
 
-int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+//int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+int wmain(int argc, char **argv) {
+    SetCurrentDirectoryA("data");
 #else
 int main(int argc, char **argv) {
+    chdir("data");
 #endif
+
 
     sfVideoMode mode = { 1280, 720, 24 };
     sfContextSettings settings = {};
@@ -78,6 +84,11 @@ int main(int argc, char **argv) {
     Game_Input *current_input = &inputs[0];
     Game_Input *prev_input    = &inputs[1];
 
+
+    Game_State __state = {};
+    Game_State *state = &__state;
+    state->renderer = global_window;
+
     global_running = true;
     sfClock *timer = sfClock_create();
     while (global_running) {
@@ -85,10 +96,7 @@ int main(int argc, char **argv) {
 
         sfRenderWindow_clear(global_window, sfBlack);
 
-        sfCircleShape *c = sfCircleShape_create();
-        sfCircleShape_setRadius(c, 15.0);
-        sfCircleShape_setPosition(c, V2(640, 360));
-        sfRenderWindow_drawCircleShape(global_window, c, 0);
+        LudumUpdateRender(state, current_input);
 
         sfRenderWindow_display(global_window);
 

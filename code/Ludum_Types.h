@@ -46,11 +46,14 @@ struct Game_Controller {
     // @Todo: Add more buttons as we need once we have more of the game idea
     union {
         struct {
+            Game_Button move_left;
+            Game_Button move_right;
+
             Game_Button interact;
             Game_Button menu;
         };
 
-        Game_Button buttons[2];
+        Game_Button buttons[4];
     };
 };
 
@@ -63,5 +66,20 @@ struct Game_Input {
 
     v2 mouse_position;
 };
+
+internal b32 IsPressed(Game_Button button) {
+    b32 result = (button.pressed);
+    return result;
+}
+
+internal b32 JustPressed(Game_Button button) {
+    b32 result = (button.pressed) && (button.transitions > 0);
+    return result;
+}
+
+internal b32 WasPressed(Game_Button button) {
+    b32 result = (!button.pressed) && (button.transitions > 0);
+    return result;
+}
 
 #endif  // LUDUM_TYPES_H_
