@@ -19,8 +19,23 @@ internal Animation CreateAnimationFromTexture(sfTexture *texture, v2 scale, u32 
     result.current_frame  = 0;
     result.accumulator    = 0;
     result.flip           = false;
+    result.pause          = false;
 
     return result;
+}
+
+internal void AddFireBall(Play_State *playState) {
+    for(u8 i = 0; i < 3; i++) {
+        Fire_Ball *fireball = &playState->fire_balls[i];
+        Player *player = &playState->player[0];
+        if(!fireball->active) {
+            fireball->active = true;
+            fireball->held = true;
+            fireball->radius = 15;
+            player->holding_fireball = true;
+            return;
+        }
+    }
 }
 
 internal void UpdateRenderAnimation(Game_State *state, Animation *animation, v2 position, f32 delta_time) {
@@ -98,24 +113,132 @@ internal u32 GetSmallestAxis(Bounding_Box *a, Bounding_Box *b) {
     return result;
 }
 
+internal void UpdateRenderFireBalls(Game_State *state, Play_State *playState, Game_Input *input) {
+    for(u8 i = 0; i < 3; i++) {
+        Fire_Ball *fireball = &playState->fire_balls[i];
+        if(!fireball->active) { continue; }
+
+        Player *player = &playState->player[0];
+        Game_Controller *controller = &input->controllers[0];
+
+
+        if(fireball->held) {
+            fireball->rotation-=90*input->delta_time;
+            sfCircleShape *r = sfCircleShape_create();
+            sfCircleShape_setRadius(r, fireball->radius);
+            sfCircleShape_setOrigin(r, V2(fireball->radius, fireball->radius));
+            sfCircleShape_setRotation(r, fireball->rotation);
+            sfCircleShape_setTexture(r, GetAsset(&state->assets, "Fireball")->texture, false);
+
+            fireball->position = V2(player->position.x + 40, player->position.y-10);
+            if(JustPressed(controller->interact)) {
+                fireball->held = false;
+                v2 dir = input->mouse_position - fireball->position;
+                f32 len = length(dir);
+                fireball->velocity = 3 * dir * (1/sqrt(len));
+                player->holding_fireball = false;
+                player->fireball_break = true;
+            }
+
+            sfCircleShape_setPosition(r, fireball->position);
+            sfRenderWindow_drawCircleShape(state->renderer, r, 0);
+            sfCircleShape_destroy(r);
+            continue;
+        }
+        else {
+            fireball->rotation-=360*input->delta_time;
+        }
+        if(length(fireball->velocity) < 30000) {
+            fireball->velocity += fireball->velocity * 100 * input->delta_time;
+        }
+        if(fireball->radius < 3) {
+            fireball->active = false;
+        }
+
+        fireball->radius -= 2*input->delta_time;
+        fireball->position += input->delta_time * fireball->velocity;
+        sfColor c = sfRed;
+        sfCircleShape *r = sfCircleShape_create();
+        sfCircleShape_setOrigin(r, V2(fireball->radius, fireball->radius));
+        sfCircleShape_setRadius(r, fireball->radius);
+        sfCircleShape_setRotation(r, fireball->rotation);
+        sfCircleShape_setTexture(r, GetAsset(&state->assets, "Fireball")->texture, false);
+        sfCircleShape_setPosition(r, fireball->position);
+        sfRenderWindow_drawCircleShape(state->renderer, r, 0);
+        sfCircleShape_destroy(r);
+    }
+}
+
 internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Game_Input *input) {
     if(!playState->initialised) {
         Player *player = &playState->player[0];
         player->position = V2(640, 360);
         player->half_dim = V2(35, 50);
         player->velocity = V2(0, 250);
+        player->health = 2;
 
         Asset *anim = GetAsset(&state->assets, "IbbSheet");
         Assert(anim);
 
         Asset *torch = GetAsset(&state->assets, "TorchSheet");
+        Assert(torch);
+
+        Asset *candle_low = GetAsset(&state->assets, "CandleLow");
+        Assert(candle_low);
+        Asset *candle_medium = GetAsset(&state->assets, "CandleMid");
+        Assert(candle_medium);
+        Asset *candle_high = GetAsset(&state->assets, "CandleHigh");
+        Assert(candle_high);
 
         sfTexture_setSmooth(torch->texture, true);
         playState->torch_animation = CreateAnimationFromTexture(torch->texture, V2(0.6, 0.6), 4, 4, 0.13f);
-
         playState->debug_anim = CreateAnimationFromTexture(anim->texture, V2(0.16, 0.16), 2, 3, 0.09f);
+        playState->candle[0] = CreateAnimationFromTexture(candle_low->texture, V2(0.16, 0.16), 1, 3, 0.08f);
+        playState->candle[1] = CreateAnimationFromTexture(candle_medium->texture, V2(0.16, 0.16), 1, 3, 0.08f);
+        playState->candle[2] = CreateAnimationFromTexture(candle_high->texture, V2(0.16, 0.16), 1, 3, 0.08f);
 
         playState->initialised = true;
+
+        playState->total_time = 0;
+        playState->distance_scale = 0.08f;
+        const char *vertex_code = R"VERT(
+            varying out vec2 frag_position;
+
+            void main() {
+                gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
+                gl_TexCoord[0] = gl_TextureMatrix[0] * gl_MultiTexCoord0;
+
+                frag_position = vec2(gl_Vertex.x, gl_Vertex.y);
+            }
+        )VERT";
+
+        const char *frag_code = R"FRAG(
+            in vec2 frag_position;
+
+            varying out vec4 final_colour;
+
+            uniform sampler2D noise;
+            uniform float time;
+
+            uniform sampler2D image;
+            uniform float distance_scale;
+            uniform vec2 light_position;
+
+            void main() {
+                vec2 dir = light_position - frag_position;
+
+                vec2 noise_uv = vec2(abs(sin(0.3 * time)), abs(cos(0.4 * time)));
+                float dist = (distance_scale - (0.04 * texture2D(noise, noise_uv))) * length(dir);
+
+                float attenuation = 1.0 / (1.0 + (0.09 * dist) + (0.032 * (dist * dist)));
+
+                vec3 ambient = attenuation * vec3(0.5, 0.5, 1);
+                final_colour = vec4(ambient, 1) * texture2D(image, gl_TexCoord[0].xy);
+            }
+        )FRAG";
+
+        playState->shader = sfShader_createFromMemory(vertex_code, 0, frag_code);
+        Assert(playState->shader);
     }
 
     f32 dt = input->delta_time;
@@ -149,11 +272,12 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
 
     player->jump_time -= dt;
     if (IsPressed(controller->jump)) {
-        if (player->can_jump && player->fall_time < 0.3) {
+        if (player->can_jump && player->fall_time < 0.3 && player->floor_time > 0.04f) {
             player->velocity.y = -350;
             player->can_jump = false;
             player->jump_time = 0.3f;
             player->falling = true;
+            player->floor_time = 0;
             playerAnimation->pause = false; 
         }
         else if (player->jump_time > 0) {
@@ -165,13 +289,36 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     player->velocity.y += (dt * 980);
     player->position += (dt * player->velocity);
 
+    if (JustPressed(input->mouse_buttons[1])) {
+        playState->distance_scale = Min(playState->distance_scale + 0.02f, 1.0f);
+    }
+
+    if (JustPressed(input->mouse_buttons[2])) {
+        playState->distance_scale = Max(playState->distance_scale - 0.02f, 0.0);
+    }
+
+    // @Speed: Looking up the noise texture every frame
+    Asset *noise = GetAsset(&state->assets, "PNoise");
+
+    playState->total_time += dt;
+    sfShader_setTextureUniform(playState->shader, "noise", noise->texture);
+    sfShader_setFloatUniform(playState->shader, "time", playState->total_time);
+    sfShader_setFloatUniform(playState->shader, "distance_scale", playState->distance_scale);
+    sfShader_setVec2Uniform(playState->shader, "light_position", player->position);
+    sfShader_bind(playState->shader);
+
     UpdateRenderAnimation(state, &playState->torch_animation, V2(600, view_size.y - 145.5), dt);
     UpdateRenderAnimation(state, &playState->debug_anim, player->position, dt);
+    u32 candle = Max(Min(player->health, 2), 0);
+    UpdateRenderAnimation(state, &playState->candle[candle], player->position + V2(40, -20), dt);
+
+    sfShader_bind(0);
 
     if (player->position.y + player->half_dim.y >= view_size.y) {
         player->position.y = view_size.y - player->half_dim.y;
         player->velocity.y = 0;
         player->can_jump = true;
+        player->floor_time += dt;
         player->falling = false;
         player->fall_time = 0;
     }
@@ -218,6 +365,7 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                             player->velocity.y = 0;
                             player->can_jump = true;
                             player->falling = false;
+                            player->floor_time += dt;
                             player->fall_time = 0;
                         }
                         break;
@@ -240,6 +388,15 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     }
     else {
         playerAnimation->pause= true; 
+    }
+    UpdateRenderFireBalls(state, playState, input);
+    if(JustPressed(controller->interact) && !player->holding_fireball && !player->fireball_break){
+        player->holding_fireball = true;
+        AddFireBall(playState);
+        player->health--;
+    }
+    else {
+        player->fireball_break = false;
     }
 
     sfRectangleShape_destroy(r);
@@ -266,6 +423,11 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
         InitAssets(&state->assets, 64);
         LoadAsset(&state->assets, "IbbSheet", Asset_Texture);
         LoadAsset(&state->assets, "TorchSheet", Asset_Texture);
+        LoadAsset(&state->assets, "CandleLow", Asset_Texture);
+        LoadAsset(&state->assets, "CandleMid", Asset_Texture);
+        LoadAsset(&state->assets, "CandleHigh", Asset_Texture);
+        LoadAsset(&state->assets, "PNoise", Asset_Texture);
+        LoadAsset(&state->assets, "Fireball", Asset_Texture);
 
         state->initialised = true;
     }
