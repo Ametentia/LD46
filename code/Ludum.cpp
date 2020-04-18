@@ -19,12 +19,29 @@ internal Animation CreateAnimationFromTexture(sfTexture *texture, v2 scale, u32 
     result.current_frame  = 0;
     result.accumulator    = 0;
     result.flip           = false;
+    result.pause          = false;
 
     return result;
 }
 
+internal void AddFireBall(Play_State *playState) {
+    for(u8 i = 0; i < 3; i++) {
+        Fire_Ball *fireball = &playState->fire_balls[i];
+        Player *player = &playState->player[0];
+        if(!fireball->active) {
+            fireball->active = true;
+            fireball->held = true;
+            fireball->radius = 15;
+            player->holding_fireball = true;
+            return;
+        }
+    }
+}
+
 internal void UpdateRenderAnimation(Game_State *state, Animation *animation, v2 position, f32 delta_time) {
-    animation->accumulator += delta_time;
+    if(!animation->pause) {
+        animation->accumulator += delta_time;
+    }
     if (animation->accumulator >= animation->time_per_frame) {
         animation->current_frame += 1;
         if (animation->current_frame >= animation->total_frames) {
@@ -48,7 +65,11 @@ internal void UpdateRenderAnimation(Game_State *state, Animation *animation, v2 
     sfSprite_setTextureRect(sprite, rect);
     sfSprite_setOrigin(sprite, 0.5f * animation->frame_size);
     sfSprite_setPosition(sprite, position);
-    sfSprite_setScale(sprite, animation->scale);
+    v2 scale = animation->scale;
+    if(animation->flip){
+        scale.x *= -1;
+    }
+    sfSprite_setScale(sprite, scale);
 
     sfRenderWindow_drawSprite(state->renderer, sprite, 0);
 
@@ -92,22 +113,89 @@ internal u32 GetSmallestAxis(Bounding_Box *a, Bounding_Box *b) {
     return result;
 }
 
+internal void UpdateRenderFireBalls(Game_State *state, Play_State *playState, Game_Input *input) {
+    for(u8 i = 0; i < 3; i++) {
+        Fire_Ball *fireball = &playState->fire_balls[i];
+        if(!fireball->active) { continue; }
+
+        Player *player = &playState->player[0];
+        Game_Controller *controller = &input->controllers[0];
+
+
+        if(fireball->held) {
+            fireball->rotation-=90*input->delta_time;
+            sfCircleShape *r = sfCircleShape_create();
+            sfCircleShape_setRadius(r, fireball->radius);
+            sfCircleShape_setOrigin(r, V2(fireball->radius, fireball->radius));
+            sfCircleShape_setRotation(r, fireball->rotation);
+            sfCircleShape_setTexture(r, GetAsset(&state->assets, "Fireball")->texture, false);
+
+            fireball->position = V2(player->position.x + 40, player->position.y-10);
+            if(JustPressed(controller->interact)) {
+                fireball->held = false;
+                v2 dir = input->mouse_position - fireball->position;
+                f32 len = length(dir);
+                fireball->velocity = 3 * dir * (1/sqrt(len));
+                player->holding_fireball = false;
+                player->fireball_break = true;
+            }
+
+            sfCircleShape_setPosition(r, fireball->position);
+            sfRenderWindow_drawCircleShape(state->renderer, r, 0);
+            sfCircleShape_destroy(r);
+            continue;
+        }
+        else {
+            fireball->rotation-=360*input->delta_time;
+        }
+        if(length(fireball->velocity) < 30000) {
+            fireball->velocity += fireball->velocity * 100 * input->delta_time;
+        }
+        if(fireball->radius < 3) {
+            fireball->active = false;
+        }
+
+        fireball->radius -= 2*input->delta_time;
+        fireball->position += input->delta_time * fireball->velocity;
+        sfColor c = sfRed;
+        sfCircleShape *r = sfCircleShape_create();
+        sfCircleShape_setOrigin(r, V2(fireball->radius, fireball->radius));
+        sfCircleShape_setRadius(r, fireball->radius);
+        sfCircleShape_setRotation(r, fireball->rotation);
+        sfCircleShape_setTexture(r, GetAsset(&state->assets, "Fireball")->texture, false);
+        sfCircleShape_setPosition(r, fireball->position);
+        sfRenderWindow_drawCircleShape(state->renderer, r, 0);
+        sfCircleShape_destroy(r);
+    }
+}
+
 internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Game_Input *input) {
     if(!playState->initialised) {
         Player *player = &playState->player[0];
         player->position = V2(640, 360);
-        player->half_dim = V2(35, 52);
+        player->half_dim = V2(35, 50);
         player->velocity = V2(0, 250);
+        player->health = 2;
 
         Asset *anim = GetAsset(&state->assets, "IbbSheet");
         Assert(anim);
 
         Asset *torch = GetAsset(&state->assets, "TorchSheet");
+        Assert(torch);
+
+        Asset *candle_low = GetAsset(&state->assets, "CandleLow");
+        Assert(candle_low);
+        Asset *candle_medium = GetAsset(&state->assets, "CandleMid");
+        Assert(candle_medium);
+        Asset *candle_high = GetAsset(&state->assets, "CandleHigh");
+        Assert(candle_high);
 
         sfTexture_setSmooth(torch->texture, true);
-        playState->torch_animation = CreateAnimationFromTexture(torch->texture, V2(0.3, 0.3), 4, 4, 0.13f);
-
-        playState->debug_anim = CreateAnimationFromTexture(anim->texture, V2(0.16, 0.16), 2, 3);
+        playState->torch_animation = CreateAnimationFromTexture(torch->texture, V2(0.6, 0.6), 4, 4, 0.13f);
+        playState->debug_anim = CreateAnimationFromTexture(anim->texture, V2(0.16, 0.16), 2, 3, 0.09f);
+        playState->candle[0] = CreateAnimationFromTexture(candle_low->texture, V2(0.16, 0.16), 1, 3, 0.08f);
+        playState->candle[1] = CreateAnimationFromTexture(candle_medium->texture, V2(0.16, 0.16), 1, 3, 0.08f);
+        playState->candle[2] = CreateAnimationFromTexture(candle_high->texture, V2(0.16, 0.16), 1, 3, 0.08f);
 
         playState->initialised = true;
 
@@ -170,31 +258,48 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
 
     Game_Controller *controller = &input->controllers[0];
     Player *player = &playState->player[0];
+    player->falling = true;
 
     player->velocity.x = 0;
-    if (IsPressed(controller->move_left)) { player->velocity.x = -600; }
-    else if (IsPressed(controller->move_right)) { player->velocity.x = 600; }
+    Animation *playerAnimation = &playState->debug_anim;
+    if (IsPressed(controller->move_left)) { 
+        player->velocity.x = -220; 
+        playerAnimation->flip = true; 
+        playerAnimation->pause= false; 
+    }
+    else if (IsPressed(controller->move_right)) {
+        player->velocity.x = 220; 
+        playerAnimation->flip = false; 
+        playerAnimation->pause= false; 
+    }
 
     player->jump_time -= dt;
     if (IsPressed(controller->jump)) {
-        if (player->on_ground) {
-            player->velocity.y = -600; //-125;
-            player->on_ground = false;
-            player->jump_time = 200; //0.5f;
+        if (player->can_jump && player->fall_time < 0.3 && player->floor_time > 0.04f) {
+            player->velocity.y = -350;
+            player->can_jump = false;
+            player->jump_time = 0.3f;
+            player->falling = true;
+            player->floor_time = 0;
+            playerAnimation->pause = false; 
         }
         else if (player->jump_time > 0) {
-            player->velocity.y = -600; //-125;
+            player->velocity.y -= 830*dt;
         }
     }
 
-    player->velocity.x *= (player->on_ground ? 1 : 1.45);
-    player->velocity.y += (dt * 250);
+    player->velocity.x *= (player->can_jump ? 1 : 0.85);
+    player->velocity.y += (dt * 980);
     player->position += (dt * player->velocity);
 
     if (player->position.y + player->half_dim.y >= screen_segment_dim.y) {
         player->position.y = screen_segment_dim.y - player->half_dim.y;
         player->velocity.y = 0;
         player->on_ground = true;
+        player->can_jump = true;
+        player->floor_time += dt;
+        player->falling = false;
+        player->fall_time = 0;
     }
 
     // @Speed: Looking up the noise texture every frame
@@ -260,8 +365,10 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     sfRectangleShape_destroy(back_rect);
     sfShader_bind(playState->shader);
 
+    UpdateRenderAnimation(state, &playState->torch_animation, V2(600, view_size.y - 145.5), dt);
     UpdateRenderAnimation(state, &playState->debug_anim, player->position, dt);
-    UpdateRenderAnimation(state, &playState->torch_animation, V2(600, view_size.y - (145.5 / 2)), dt);
+    u32 candle = Max(Min(player->health, 2), 0);
+    UpdateRenderAnimation(state, &playState->candle[candle], player->position + V2(40, -20), dt);
 
     sfShader_bind(0);
 
@@ -341,6 +448,7 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     sfRectangleShape_setOutlineColor(r, c);
     sfRectangleShape_setOutlineThickness(r, 2);
 
+<<<<<<< HEAD
     for (u32 it = 0; it < 128; ++it) {
         if (playState->level[it].occupied) {
             Bounding_Box *other = &playState->level[it].box;
@@ -363,6 +471,10 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                         player->position.y = other->centre.y - full_size.y;
                         player->velocity.y = 0;
                         player->on_ground = true;
+                        player->can_jump = true;
+                        player->falling = false;
+                        player->floor_time += dt;
+                        player->fall_time = 0;
                     }
                     break;
                     case 3: {
@@ -381,6 +493,21 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
             sfRenderWindow_drawRectangleShape(state->renderer, r, 0);
         }
     }
+    if (player->falling) {
+        player->fall_time += dt;
+    }
+    else {
+        playerAnimation->pause= true; 
+    }
+    UpdateRenderFireBalls(state, playState, input);
+    if(JustPressed(controller->interact) && !player->holding_fireball && !player->fireball_break){
+        player->holding_fireball = true;
+        AddFireBall(playState);
+        player->health--;
+    }
+    else {
+        player->fireball_break = false;
+    }
 
     sfRectangleShape_destroy(r);
 
@@ -393,7 +520,7 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     sfRectangleShape_setOutlineColor(bbox, c);
     sfRectangleShape_setOutlineThickness(bbox, 2);
 
-    sfRenderWindow_drawRectangleShape(state->renderer, bbox, 0);
+    //sfRenderWindow_drawRectangleShape(state->renderer, bbox, 0);
 
     sfRectangleShape_destroy(bbox);
 }
@@ -406,8 +533,12 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
         InitAssets(&state->assets, 64);
         LoadAsset(&state->assets, "IbbSheet", Asset_Texture);
         LoadAsset(&state->assets, "TorchSheet", Asset_Texture);
+        LoadAsset(&state->assets, "CandleLow", Asset_Texture);
+        LoadAsset(&state->assets, "CandleMid", Asset_Texture);
+        LoadAsset(&state->assets, "CandleHigh", Asset_Texture);
         LoadAsset(&state->assets, "PNoise", Asset_Texture);
         LoadAsset(&state->assets, "Location-01", Asset_Texture);
+        LoadAsset(&state->assets, "Fireball", Asset_Texture);
 
         state->initialised = true;
     }

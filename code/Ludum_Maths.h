@@ -22,17 +22,32 @@ inline v2 operator+(v2 a, v2 b) {
     return result;
 }
 
-internal v2 &operator+=(v2 &a, v2 b) {
-    a = a + b;
-    return a;
-}
-
 internal v2 operator-(v2 a, v2 b) {
     v2 result;
     result.x = a.x - b.x;
     result.y = a.y - b.y;
 
     return result;
+}
+
+inline f32 length(v2 a, v2 b) {
+    v2 result = a - b;
+    result.x = result.x * result.x;
+    result.y = result.y * result.y;
+
+    return result.x + result.y;
+}
+
+inline f32 length(v2 a) {
+    a.x = a.x * a.x;
+    a.y = a.y * a.y;
+
+    return a.x + a.y;
+}
+
+internal v2 &operator+=(v2 &a, v2 b) {
+    a = a + b;
+    return a;
 }
 
 internal v2 operator-(v2 a) {

@@ -48,6 +48,7 @@ struct Animation {
     f32 accumulator;
     f32 time_per_frame;
     b32 flip;
+    b32 pause;
 };
 
 struct Bounding_Box {
@@ -55,15 +56,29 @@ struct Bounding_Box {
     v2 half_dim;
 };
 
+struct Fire_Ball {
+    b32 active;
+    v2 position;
+    v2 velocity;
+    f32 radius;
+    f32 rotation;
+    b32 held;
+};
+
 struct Player {
     v2 half_dim;
 
     f32 jump_time;
-    b32 on_ground;
+    b32 can_jump;
+    b32 falling;
+    f32 fall_time;
+    f32 floor_time;
     v2 position;
     v2 velocity;
 
-    u8 health;
+    s8 health;
+    b32 holding_fireball;
+    b32 fireball_break;
 };
 
 struct Square {
@@ -80,9 +95,11 @@ struct Play_State {
 
     b32 is_editing;
     v2 first_mouse_down;
+    Fire_Ball fire_balls[3];
 
     Animation torch_animation;
     Animation debug_anim;
+    Animation candle[3];
 
     f32 total_time;
     f32 distance_scale;
