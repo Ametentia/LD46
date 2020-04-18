@@ -35,8 +35,10 @@ typedef sfVector3f v3;
 #define Swap(a, b) { auto __temp = a; a = b; b = __temp; }
 #define Assert(exp) do { if (!(exp)) { printf("Assertion :: %s (%s:%d)\n", #exp, __FILE__, __LINE__); asm("int3"); } } while (0)
 
+#define Abs(x) ((x) < 0 ? -(x) : (x))
 #define Min(a, b) ((a) < (b) ? (a) : (b))
 #define Max(a, b) ((a) > (b) ? (a) : (b))
+#define Square(x) ((x) * (x))
 #define Alloc(size) malloc(size)
 
 struct Game_Button {
@@ -67,6 +69,7 @@ struct Game_Input {
 
     Game_Controller controllers[4];
 
+    Game_Button mouse_buttons[3];
     v2 mouse_position;
 };
 

@@ -36,7 +36,7 @@ struct Asset_Manager {
 struct Animation {
     sfTexture *texture;
 
-    v2 size;
+    v2 scale;
     v2 frame_size;
 
     u32 rows;
@@ -50,18 +50,34 @@ struct Animation {
     b32 flip;
 };
 
-struct Bounding_Box {};
+struct Bounding_Box {
+    v2 centre;
+    v2 half_dim;
+};
 
 struct Player {
+    v2 half_dim;
+
+    f32 jump_time;
+    b32 on_ground;
     v2 position;
     v2 velocity;
+
     u8 health;
+};
+
+struct Square {
+    b32 occupied;
+    v2 centre;
 };
 
 struct Play_State {
     b32 initialised;
     Player player[1];
 
+    Square level[64][64];
+
+    Animation torch_animation;
     Animation debug_anim;
 };
 
