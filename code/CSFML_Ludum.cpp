@@ -68,6 +68,7 @@ int main(int argc, char **argv) {
 
 
     sfVideoMode mode = { 1280, 720, 24 };
+    //sfVideoMode mode = { 1920, 1080, 24 };
     sfContextSettings settings = {};
     settings.antialiasingLevel = 8;
 
@@ -77,7 +78,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    global_view_size = V2(mode.width, mode.height);
+    global_view_size = V2(1280, 720);
     global_view = sfView_create();
 
     sfView_setSize(global_view, global_view_size);

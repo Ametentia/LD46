@@ -69,4 +69,10 @@ internal v2 &operator*=(v2 &a, f32 b) {
     return a;
 }
 
+
+internal v3 V3(f32 x, f32 y, f32 z) {
+    v3 result = { x, y, z };
+    return result;
+}
+
 #endif  // LUDUM_MATHS_H_

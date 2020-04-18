@@ -68,15 +68,18 @@ struct Player {
 
 struct Square {
     b32 occupied;
-    v2 centre;
+    Bounding_Box box;
 };
 
 struct Play_State {
     b32 initialised;
     Player player[1];
 
-    Square level[64][64];
+    u32 next_square;
+    Square level[128];
 
+    b32 is_editing;
+    v2 first_mouse_down;
 
     Animation torch_animation;
     Animation debug_anim;

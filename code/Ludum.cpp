@@ -124,27 +124,37 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
             }
         )VERT";
 
+        // @Todo: Vary noise per light?
         const char *frag_code = R"FRAG(
             in vec2 frag_position;
 
+            #define MAX_LIGHTS 16
+
             varying out vec4 final_colour;
+
+            uniform sampler2D image;
+
+            // Light Information
+            uniform vec2 light_positions[MAX_LIGHTS];
+            uniform vec3 light_colours[MAX_LIGHTS];
+            uniform float light_distance_scales[MAX_LIGHTS];
 
             uniform sampler2D noise;
             uniform float time;
 
-            uniform sampler2D image;
-            uniform float distance_scale;
-            uniform vec2 light_position;
-
             void main() {
-                vec2 dir = light_position - frag_position;
+                vec3 ambient = vec3(0, 0, 0);
+                for (int it = 0; it < MAX_LIGHTS; ++it) {
+                    vec2 dir = light_positions[it] - frag_position;
 
-                vec2 noise_uv = vec2(abs(sin(0.3 * time)), abs(cos(0.4 * time)));
-                float dist = (distance_scale - (0.04 * texture2D(noise, noise_uv))) * length(dir);
+                    vec2 noise_uv = vec2(abs(sin(0.1 * time)), abs(cos(0.1 * time)));
+                    float dist = (light_distance_scales[it] - (0.01 * texture2D(noise, noise_uv))) * length(dir);
 
-                float attenuation = 1.0 / (1.0 + (0.09 * dist) + (0.032 * (dist * dist)));
+                    float attenuation = 1.0 / (1.0 + (0.09 * dist) + (0.032 * (dist * dist)));
 
-                vec3 ambient = attenuation * vec3(0.5, 0.5, 1);
+                    ambient += attenuation * light_colours[it];
+                }
+
                 final_colour = vec4(ambient, 1) * texture2D(image, gl_TexCoord[0].xy);
             }
         )FRAG";
@@ -156,54 +166,98 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     f32 dt = input->delta_time;
 
     v2 view_size = sfView_getSize(state->view);
+    v2 screen_segment_dim = V2(2880, 1440);
 
     Game_Controller *controller = &input->controllers[0];
     Player *player = &playState->player[0];
 
-    if (JustPressed(input->mouse_buttons[0])) {
-        u32 x = cast(u32) (input->mouse_position.x / 64);
-        u32 y = cast(u32) (input->mouse_position.y / 64);
-        Assert(x < 64 && y < 64);
-
-        playState->level[x][y].occupied = true;
-    }
-
     player->velocity.x = 0;
-    if (IsPressed(controller->move_left)) { player->velocity.x = -180; }
-    else if (IsPressed(controller->move_right)) { player->velocity.x = 180; }
+    if (IsPressed(controller->move_left)) { player->velocity.x = -600; }
+    else if (IsPressed(controller->move_right)) { player->velocity.x = 600; }
 
     player->jump_time -= dt;
     if (IsPressed(controller->jump)) {
         if (player->on_ground) {
-            player->velocity.y = -125;
+            player->velocity.y = -600; //-125;
             player->on_ground = false;
-            player->jump_time = 0.5f;
+            player->jump_time = 200; //0.5f;
         }
         else if (player->jump_time > 0) {
-            player->velocity.y = -125;
+            player->velocity.y = -600; //-125;
         }
     }
 
-    if (JustPressed(input->mouse_buttons[1])) {
-        playState->distance_scale = Min(playState->distance_scale + 0.02f, 1.0f);
-    }
-
-    if (JustPressed(input->mouse_buttons[2])) {
-        playState->distance_scale = Max(playState->distance_scale - 0.02f, 0.0);
-    }
-
-    player->velocity.x *= (player->on_ground ? 1 : 0.45);
+    player->velocity.x *= (player->on_ground ? 1 : 1.45);
     player->velocity.y += (dt * 250);
     player->position += (dt * player->velocity);
+
+    if (player->position.y + player->half_dim.y >= screen_segment_dim.y) {
+        player->position.y = screen_segment_dim.y - player->half_dim.y;
+        player->velocity.y = 0;
+        player->on_ground = true;
+    }
 
     // @Speed: Looking up the noise texture every frame
     Asset *noise = GetAsset(&state->assets, "PNoise");
 
+    v2 light_positions[3] = {
+        player->position,
+        V2(600, view_size.y - (145.5 / 2)),
+        V2(100, screen_segment_dim.y - 250)
+    };
+
+    v3 light_colours[3] = {
+        V3(0.5, 0.5, 1),
+        V3(1, 0, 0),
+        V3(0, 1, 0)
+    };
+
+    f32 light_distance_scales[3] = {
+        0.08,
+        0.10,
+        0.04
+    };
+
     playState->total_time += dt;
     sfShader_setTextureUniform(playState->shader, "noise", noise->texture);
     sfShader_setFloatUniform(playState->shader, "time", playState->total_time);
-    sfShader_setFloatUniform(playState->shader, "distance_scale", playState->distance_scale);
-    sfShader_setVec2Uniform(playState->shader, "light_position", player->position);
+    sfShader_setFloatUniformArray(playState->shader, "light_distance_scales", light_distance_scales, 3);
+    sfShader_setVec2UniformArray(playState->shader, "light_positions", light_positions, 3);
+    sfShader_setVec3UniformArray(playState->shader, "light_colours", light_colours, 3);
+
+
+    // @Speed: Getting the texture every time
+    //
+
+
+    sfCircleShape *origin = sfCircleShape_create();
+    sfCircleShape_setOrigin(origin, V2(10, 10));
+    sfCircleShape_setRadius(origin, 10);
+    sfCircleShape_setPosition(origin, V2(0, 0));
+    sfCircleShape_setFillColor(origin, sfMagenta);
+
+    sfRenderWindow_drawCircleShape(state->renderer, origin, 0);
+
+    sfCircleShape_destroy(origin);
+
+    v2 new_view_pos = {};
+    new_view_pos.x = player->position.x; //Max(player->position.x, -800);
+    new_view_pos.y = player->position.y; //360;
+
+    sfView_setCenter(state->view, new_view_pos);
+    sfRenderWindow_setView(state->renderer, state->view);
+
+    Asset *bg = GetAsset(&state->assets, "Location-01");
+    sfRectangleShape *back_rect = sfRectangleShape_create();
+    sfRectangleShape_setSize(back_rect, screen_segment_dim);
+
+    sfRenderWindow_drawRectangleShape(state->renderer, back_rect, 0);
+
+    sfRectangleShape_setTexture(back_rect, bg->texture, true);
+
+    sfRenderWindow_drawRectangleShape(state->renderer, back_rect, 0);
+
+    sfRectangleShape_destroy(back_rect);
     sfShader_bind(playState->shader);
 
     UpdateRenderAnimation(state, &playState->debug_anim, player->position, dt);
@@ -211,10 +265,69 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
 
     sfShader_bind(0);
 
-    if (player->position.y + player->half_dim.y >= view_size.y) {
-        player->position.y = view_size.y - player->half_dim.y;
-        player->velocity.y = 0;
-        player->on_ground = true;
+    sfCircleShape *li = sfCircleShape_create();
+    sfCircleShape_setRadius(li, 5);
+    sfCircleShape_setOrigin(li, V2(5, 5));
+    for (u32 it = 0; it < 3; ++it) {
+        sfCircleShape_setPosition(li, light_positions[it]);
+
+        sfColor c = {
+            cast(u8) (255 * light_colours[it].x),
+            cast(u8) (255 * light_colours[it].y),
+            cast(u8) (255 * light_colours[it].z),
+            255
+        };
+
+        sfCircleShape_setFillColor(li, c);
+
+        sfRenderWindow_drawCircleShape(state->renderer, li, 0);
+    }
+
+    sfCircleShape_destroy(li);
+
+    if (JustPressed(input->mouse_buttons[0])) {
+        playState->first_mouse_down = input->mouse_position;
+        playState->is_editing = true;
+    }
+
+    if (WasPressed(input->mouse_buttons[0])) {
+        // @Todo: Commit
+        playState->is_editing = false;
+
+        v2 diff = 0.5f * (input->mouse_position - playState->first_mouse_down);
+        diff.x = Abs(diff.x);
+        diff.y = Abs(diff.y);
+
+        v2 min = V2(Min(input->mouse_position.x, playState->first_mouse_down.x),
+                    Min(input->mouse_position.y, playState->first_mouse_down.y));
+
+        Square *next = &playState->level[playState->next_square];
+        playState->next_square += 1;
+
+        next->box.centre   = min + diff;
+        next->box.half_dim = diff;
+        next->occupied = true;
+    }
+
+    if (playState->is_editing) {
+        v2 min = V2(Min(input->mouse_position.x, playState->first_mouse_down.x),
+                    Min(input->mouse_position.y, playState->first_mouse_down.y));
+
+        v2 max = V2(Max(input->mouse_position.x, playState->first_mouse_down.x),
+                    Max(input->mouse_position.y, playState->first_mouse_down.y));
+
+        v2 half_dim = (max - min);
+
+        sfRectangleShape *r = sfRectangleShape_create();
+        sfRectangleShape_setPosition(r, min);
+        sfRectangleShape_setSize(r, half_dim);
+        sfRectangleShape_setFillColor(r, sfTransparent);
+        sfRectangleShape_setOutlineColor(r, sfRed);
+        sfRectangleShape_setOutlineThickness(r, 2);
+
+        sfRenderWindow_drawRectangleShape(state->renderer, r, 0);
+
+        sfRectangleShape_destroy(r);
     }
 
     Bounding_Box player_box;
@@ -224,54 +337,48 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     sfColor c = sfRed;
 
     sfRectangleShape *r = sfRectangleShape_create();
-    sfRectangleShape_setOrigin(r, V2(32, 32));
-    sfRectangleShape_setSize(r, V2(64, 64));
-    sfRectangleShape_setFillColor(r, sfTransparent);
+   sfRectangleShape_setFillColor(r, sfTransparent);
     sfRectangleShape_setOutlineColor(r, c);
     sfRectangleShape_setOutlineThickness(r, 2);
 
-    v2 grid_pos = V2((64 * cast(u32) (input->mouse_position.x / 64)), (64 * cast(u32) (input->mouse_position.y / 64)));
-    sfRectangleShape_setPosition(r, grid_pos);
+    for (u32 it = 0; it < 128; ++it) {
+        if (playState->level[it].occupied) {
+            Bounding_Box *other = &playState->level[it].box;
+            if (Overlaps(&player_box, other)) {
+                c = sfGreen;
 
-    sfRenderWindow_drawRectangleShape(state->renderer, r, 0);
+                v2 full_size = player->half_dim + other->half_dim;
 
-    for (u32 x = 0; x < 64; ++x) {
-        for (u32 y = 0; y < 64; ++y) {
-            if (playState->level[x][y].occupied) {
-                Bounding_Box other = { V2(x * 64, y * 64), V2(32, 32) };
-                if (Overlaps(&player_box, &other)) {
-                    c = sfGreen;
-
-                    v2 full_size = player->half_dim + other.half_dim;
-
-                    u32 axis = GetSmallestAxis(&player_box, &other);
-                    switch (axis) {
-                        case 0: {
-                            player->position.x = other.centre.x - full_size.x;
-                        }
-                        break;
-                        case 1: {
-                            player->position.x = other.centre.x + full_size.x;
-                        }
-                        break;
-                        case 2: {
-                            player->position.y = other.centre.y - full_size.y;
-                            player->velocity.y = 0;
-                            player->on_ground = true;
-                        }
-                        break;
-                        case 3: {
-                            player->position.y = other.centre.y + full_size.y;
-                            player->velocity.y = -0.45f * player->velocity.y;
-                            player->jump_time = 0;
-                        }
-                        break;
+                u32 axis = GetSmallestAxis(&player_box, other);
+                switch (axis) {
+                    case 0: {
+                        player->position.x = other->centre.x - full_size.x;
                     }
+                    break;
+                    case 1: {
+                        player->position.x = other->centre.x + full_size.x;
+                    }
+                    break;
+                    case 2: {
+                        player->position.y = other->centre.y - full_size.y;
+                        player->velocity.y = 0;
+                        player->on_ground = true;
+                    }
+                    break;
+                    case 3: {
+                        player->position.y = other->centre.y + full_size.y;
+                        player->velocity.y = -0.45f * player->velocity.y;
+                        player->jump_time = 0;
+                    }
+                    break;
                 }
-
-                sfRectangleShape_setPosition(r, other.centre);
-                sfRenderWindow_drawRectangleShape(state->renderer, r, 0);
             }
+
+            sfRectangleShape_setOrigin(r, other->half_dim);
+            sfRectangleShape_setSize(r, 2 * other->half_dim);
+
+            sfRectangleShape_setPosition(r, other->centre);
+            sfRenderWindow_drawRectangleShape(state->renderer, r, 0);
         }
     }
 
@@ -300,6 +407,7 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
         LoadAsset(&state->assets, "IbbSheet", Asset_Texture);
         LoadAsset(&state->assets, "TorchSheet", Asset_Texture);
         LoadAsset(&state->assets, "PNoise", Asset_Texture);
+        LoadAsset(&state->assets, "Location-01", Asset_Texture);
 
         state->initialised = true;
     }
