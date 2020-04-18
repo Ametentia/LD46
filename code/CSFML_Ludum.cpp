@@ -3,15 +3,18 @@
 #include <SFML/Audio.h>
 
 #include <stdio.h>
+#include <string.h>
 
+#include "Ludum.h"
 #include "Ludum_Types.h"
 #include "Ludum_Maths.h"
-
+#include "Ludum.cpp"
 
 global sfRenderWindow *global_window;
 global sfView *global_view;
 global v2 global_view_size;
 global b32 global_running;
+
 
 internal void CSFMLProcessGameButton(Game_Button *current, Game_Button *prev, b32 pressed) {
     current->pressed = pressed;
@@ -45,6 +48,9 @@ internal void CSFMLHandleInputs(Game_Input *current_input, Game_Input *prev_inpu
 
     CSFMLProcessGameButton(&current_keyboard->menu, &prev_keyboard->menu, sfKeyboard_isKeyPressed(sfKeyEscape));
     CSFMLProcessGameButton(&current_keyboard->interact, &prev_keyboard->interact, sfKeyboard_isKeyPressed(sfKeyE));
+    CSFMLProcessGameButton(&current_keyboard->playerLeft, &prev_keyboard->playerLeft, sfKeyboard_isKeyPressed(sfKeyA));
+    CSFMLProcessGameButton(&current_keyboard->playerRight, &prev_keyboard->playerRight, sfKeyboard_isKeyPressed(sfKeyD));
+    CSFMLProcessGameButton(&current_keyboard->playerJump, &prev_keyboard->playerJump, sfKeyboard_isKeyPressed(sfKeySpace));
 }
 
 #if WIN_LUDUM
@@ -80,16 +86,15 @@ int main(int argc, char **argv) {
 
     global_running = true;
     sfClock *timer = sfClock_create();
+    Game_State _state = {};
+    Game_State *state = &_state;
+    state->renderer = global_window;
+    state->view = global_view;
     while (global_running) {
         CSFMLHandleInputs(current_input, prev_input);
 
         sfRenderWindow_clear(global_window, sfBlack);
-
-        sfCircleShape *c = sfCircleShape_create();
-        sfCircleShape_setRadius(c, 15.0);
-        sfCircleShape_setPosition(c, V2(640, 360));
-        sfRenderWindow_drawCircleShape(global_window, c, 0);
-
+        UpdateRenderLudum(state, current_input);
         sfRenderWindow_display(global_window);
 
         global_running = !current_input->requested_quit;
