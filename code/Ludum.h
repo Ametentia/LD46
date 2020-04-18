@@ -48,6 +48,7 @@ struct Animation {
     f32 accumulator;
     f32 time_per_frame;
     b32 flip;
+    b32 pause;
 };
 
 struct Bounding_Box {
@@ -59,7 +60,9 @@ struct Player {
     v2 half_dim;
 
     f32 jump_time;
-    b32 on_ground;
+    b32 can_jump;
+    b32 falling;
+    f32 fall_time;
     v2 position;
     v2 velocity;
 

@@ -24,7 +24,9 @@ internal Animation CreateAnimationFromTexture(sfTexture *texture, v2 scale, u32 
 }
 
 internal void UpdateRenderAnimation(Game_State *state, Animation *animation, v2 position, f32 delta_time) {
-    animation->accumulator += delta_time;
+    if(!animation->pause) {
+        animation->accumulator += delta_time;
+    }
     if (animation->accumulator >= animation->time_per_frame) {
         animation->current_frame += 1;
         if (animation->current_frame >= animation->total_frames) {
@@ -48,7 +50,11 @@ internal void UpdateRenderAnimation(Game_State *state, Animation *animation, v2 
     sfSprite_setTextureRect(sprite, rect);
     sfSprite_setOrigin(sprite, 0.5f * animation->frame_size);
     sfSprite_setPosition(sprite, position);
-    sfSprite_setScale(sprite, animation->scale);
+    v2 scale = animation->scale;
+    if(animation->flip){
+        scale.x *= -1;
+    }
+    sfSprite_setScale(sprite, scale);
 
     sfRenderWindow_drawSprite(state->renderer, sprite, 0);
 
@@ -96,18 +102,18 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     if(!playState->initialised) {
         Player *player = &playState->player[0];
         player->position = V2(640, 360);
-        player->half_dim = V2(16, 32);
+        player->half_dim = V2(35, 50);
         player->velocity = V2(0, 250);
 
-        Asset *anim = GetAsset(&state->assets, "PlayerMove");
+        Asset *anim = GetAsset(&state->assets, "IbbSheet");
         Assert(anim);
 
         Asset *torch = GetAsset(&state->assets, "TorchSheet");
 
         sfTexture_setSmooth(torch->texture, true);
-        playState->torch_animation = CreateAnimationFromTexture(torch->texture, V2(0.3, 0.3), 4, 4, 0.13f);
+        playState->torch_animation = CreateAnimationFromTexture(torch->texture, V2(0.6, 0.6), 4, 4, 0.13f);
 
-        playState->debug_anim = CreateAnimationFromTexture(anim->texture, V2(1, 1), 1, 5);
+        playState->debug_anim = CreateAnimationFromTexture(anim->texture, V2(0.16, 0.16), 2, 3, 0.09f);
 
         playState->initialised = true;
     }
@@ -118,6 +124,7 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
 
     Game_Controller *controller = &input->controllers[0];
     Player *player = &playState->player[0];
+    player->falling = true;
 
     if (JustPressed(input->mouse_buttons[0])) {
         u32 x = cast(u32) (input->mouse_position.x / 64);
@@ -128,32 +135,45 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     }
 
     player->velocity.x = 0;
-    if (IsPressed(controller->move_left)) { player->velocity.x = -180; }
-    else if (IsPressed(controller->move_right)) { player->velocity.x = 180; }
+    Animation *playerAnimation = &playState->debug_anim;
+    if (IsPressed(controller->move_left)) { 
+        player->velocity.x = -220; 
+        playerAnimation->flip = true; 
+        playerAnimation->pause= false; 
+    }
+    else if (IsPressed(controller->move_right)) {
+        player->velocity.x = 220; 
+        playerAnimation->flip = false; 
+        playerAnimation->pause= false; 
+    }
 
     player->jump_time -= dt;
     if (IsPressed(controller->jump)) {
-        if (player->on_ground) {
-            player->velocity.y = -125;
-            player->on_ground = false;
-            player->jump_time = 0.5f;
+        if (player->can_jump && player->fall_time < 0.3) {
+            player->velocity.y = -350;
+            player->can_jump = false;
+            player->jump_time = 0.3f;
+            player->falling = true;
+            playerAnimation->pause = false; 
         }
         else if (player->jump_time > 0) {
-            player->velocity.y = -125;
+            player->velocity.y -= 830*dt;
         }
     }
 
-    player->velocity.x *= (player->on_ground ? 1 : 0.45);
-    player->velocity.y += (dt * 250);
+    player->velocity.x *= (player->can_jump ? 1 : 0.85);
+    player->velocity.y += (dt * 980);
     player->position += (dt * player->velocity);
 
+    UpdateRenderAnimation(state, &playState->torch_animation, V2(600, view_size.y - 145.5), dt);
     UpdateRenderAnimation(state, &playState->debug_anim, player->position, dt);
-    UpdateRenderAnimation(state, &playState->torch_animation, V2(600, view_size.y - (145.5 / 2)), dt);
 
     if (player->position.y + player->half_dim.y >= view_size.y) {
         player->position.y = view_size.y - player->half_dim.y;
         player->velocity.y = 0;
-        player->on_ground = true;
+        player->can_jump = true;
+        player->falling = false;
+        player->fall_time = 0;
     }
 
     Bounding_Box player_box;
@@ -196,7 +216,9 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                         case 2: {
                             player->position.y = other.centre.y - full_size.y;
                             player->velocity.y = 0;
-                            player->on_ground = true;
+                            player->can_jump = true;
+                            player->falling = false;
+                            player->fall_time = 0;
                         }
                         break;
                         case 3: {
@@ -213,6 +235,12 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
             }
         }
     }
+    if (player->falling) {
+        player->fall_time += dt;
+    }
+    else {
+        playerAnimation->pause= true; 
+    }
 
     sfRectangleShape_destroy(r);
 
@@ -225,7 +253,7 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     sfRectangleShape_setOutlineColor(bbox, c);
     sfRectangleShape_setOutlineThickness(bbox, 2);
 
-    sfRenderWindow_drawRectangleShape(state->renderer, bbox, 0);
+    //sfRenderWindow_drawRectangleShape(state->renderer, bbox, 0);
 
     sfRectangleShape_destroy(bbox);
 }
@@ -236,7 +264,7 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
 
         state->player_pos = V2(250, 400);
         InitAssets(&state->assets, 64);
-        LoadAsset(&state->assets, "PlayerMove", Asset_Texture);
+        LoadAsset(&state->assets, "IbbSheet", Asset_Texture);
         LoadAsset(&state->assets, "TorchSheet", Asset_Texture);
 
         state->initialised = true;
