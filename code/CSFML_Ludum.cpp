@@ -58,6 +58,7 @@ internal void CSFMLHandleInputs(Game_Input *current_input, Game_Input *prev_inpu
 int wmain(int argc, char **argv) {
     SetCurrentDirectoryA("data");
 #else
+#include <unistd.h>
 int main(int argc, char **argv) {
     chdir("data");
 #endif
