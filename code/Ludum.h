@@ -77,8 +77,13 @@ struct Play_State {
 
     Square level[64][64];
 
+
     Animation torch_animation;
     Animation debug_anim;
+
+    f32 total_time;
+    f32 distance_scale;
+    sfShader *shader;
 };
 
 enum Level_Type {

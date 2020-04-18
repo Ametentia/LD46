@@ -96,10 +96,10 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     if(!playState->initialised) {
         Player *player = &playState->player[0];
         player->position = V2(640, 360);
-        player->half_dim = V2(16, 32);
+        player->half_dim = V2(35, 52);
         player->velocity = V2(0, 250);
 
-        Asset *anim = GetAsset(&state->assets, "PlayerMove");
+        Asset *anim = GetAsset(&state->assets, "IbbSheet");
         Assert(anim);
 
         Asset *torch = GetAsset(&state->assets, "TorchSheet");
@@ -107,9 +107,50 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
         sfTexture_setSmooth(torch->texture, true);
         playState->torch_animation = CreateAnimationFromTexture(torch->texture, V2(0.3, 0.3), 4, 4, 0.13f);
 
-        playState->debug_anim = CreateAnimationFromTexture(anim->texture, V2(1, 1), 1, 5);
+        playState->debug_anim = CreateAnimationFromTexture(anim->texture, V2(0.16, 0.16), 2, 3);
 
         playState->initialised = true;
+
+        playState->total_time = 0;
+        playState->distance_scale = 0.08f;
+        const char *vertex_code = R"VERT(
+            varying out vec2 frag_position;
+
+            void main() {
+                gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
+                gl_TexCoord[0] = gl_TextureMatrix[0] * gl_MultiTexCoord0;
+
+                frag_position = vec2(gl_Vertex.x, gl_Vertex.y);
+            }
+        )VERT";
+
+        const char *frag_code = R"FRAG(
+            in vec2 frag_position;
+
+            varying out vec4 final_colour;
+
+            uniform sampler2D noise;
+            uniform float time;
+
+            uniform sampler2D image;
+            uniform float distance_scale;
+            uniform vec2 light_position;
+
+            void main() {
+                vec2 dir = light_position - frag_position;
+
+                vec2 noise_uv = vec2(abs(sin(0.3 * time)), abs(cos(0.4 * time)));
+                float dist = (distance_scale - (0.04 * texture2D(noise, noise_uv))) * length(dir);
+
+                float attenuation = 1.0 / (1.0 + (0.09 * dist) + (0.032 * (dist * dist)));
+
+                vec3 ambient = attenuation * vec3(0.5, 0.5, 1);
+                final_colour = vec4(ambient, 1) * texture2D(image, gl_TexCoord[0].xy);
+            }
+        )FRAG";
+
+        playState->shader = sfShader_createFromMemory(vertex_code, 0, frag_code);
+        Assert(playState->shader);
     }
 
     f32 dt = input->delta_time;
@@ -143,12 +184,32 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
         }
     }
 
+    if (JustPressed(input->mouse_buttons[1])) {
+        playState->distance_scale = Min(playState->distance_scale + 0.02f, 1.0f);
+    }
+
+    if (JustPressed(input->mouse_buttons[2])) {
+        playState->distance_scale = Max(playState->distance_scale - 0.02f, 0.0);
+    }
+
     player->velocity.x *= (player->on_ground ? 1 : 0.45);
     player->velocity.y += (dt * 250);
     player->position += (dt * player->velocity);
 
+    // @Speed: Looking up the noise texture every frame
+    Asset *noise = GetAsset(&state->assets, "PNoise");
+
+    playState->total_time += dt;
+    sfShader_setTextureUniform(playState->shader, "noise", noise->texture);
+    sfShader_setFloatUniform(playState->shader, "time", playState->total_time);
+    sfShader_setFloatUniform(playState->shader, "distance_scale", playState->distance_scale);
+    sfShader_setVec2Uniform(playState->shader, "light_position", player->position);
+    sfShader_bind(playState->shader);
+
     UpdateRenderAnimation(state, &playState->debug_anim, player->position, dt);
     UpdateRenderAnimation(state, &playState->torch_animation, V2(600, view_size.y - (145.5 / 2)), dt);
+
+    sfShader_bind(0);
 
     if (player->position.y + player->half_dim.y >= view_size.y) {
         player->position.y = view_size.y - player->half_dim.y;
@@ -236,8 +297,9 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
 
         state->player_pos = V2(250, 400);
         InitAssets(&state->assets, 64);
-        LoadAsset(&state->assets, "PlayerMove", Asset_Texture);
+        LoadAsset(&state->assets, "IbbSheet", Asset_Texture);
         LoadAsset(&state->assets, "TorchSheet", Asset_Texture);
+        LoadAsset(&state->assets, "PNoise", Asset_Texture);
 
         state->initialised = true;
     }
