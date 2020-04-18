@@ -79,6 +79,7 @@ struct Player {
     s8 health;
     b32 holding_fireball;
     b32 fireball_break;
+    b32 on_ground;
 };
 
 struct Square {

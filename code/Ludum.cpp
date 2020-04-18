@@ -448,7 +448,6 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     sfRectangleShape_setOutlineColor(r, c);
     sfRectangleShape_setOutlineThickness(r, 2);
 
-<<<<<<< HEAD
     for (u32 it = 0; it < 128; ++it) {
         if (playState->level[it].occupied) {
             Bounding_Box *other = &playState->level[it].box;
