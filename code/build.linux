@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+
+CompilerFlags="-O0 -g -ggdb -DLUDUM_LINUX=1"
+LinkerFlags="-lcsfml-audio -lcsfml-graphics -lcsfml-window -lcsfml-system"
+
+if [ ! -d "../build" ];
+then
+    mkdir "../build"
+fi
+
+pushd "../build" > /dev/null 2> /dev/null
+
+clang++ $CompilerFlags "../code/CSFML_Ludum.cpp" -o CSFML_Ludum.bin $LinkerFlags
+
+popd > /dev/null 2> /dev/null

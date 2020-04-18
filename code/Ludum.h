@@ -50,8 +50,31 @@ struct Animation {
     b32 flip;
 };
 
-struct Bounding_Box {
+struct Bounding_Box {};
 
+struct Player {
+    v2 position;
+    v2 velocity;
+    u8 health;
+};
+
+struct Play_State {
+    b32 initialised;
+    Player player[1];
+
+    Animation debug_anim;
+};
+
+enum Level_Type {
+    LevelType_Play
+};
+
+struct Level_State {
+    Level_Type type;
+    union {
+        Play_State play;
+    };
+    Level_State *next;
 };
 
 struct Game_State {
@@ -60,8 +83,10 @@ struct Game_State {
     sfRenderWindow *renderer;
     Asset_Manager assets;
 
+    sfView *view;
+    Level_State *current_state;
+
     v2 player_pos;
-    Animation debug_anim;
 };
 
 internal b32 StringsEqual(const char *a, const char *b) {

@@ -2,6 +2,7 @@
 #define LUDUM_TYPES_H_ 1
 
 #include <stdint.h>
+#include <stdlib.h>
 
 typedef uint8_t  u8;
 typedef uint16_t u16;
@@ -36,6 +37,7 @@ typedef sfVector3f v3;
 
 #define Min(a, b) ((a) < (b) ? (a) : (b))
 #define Max(a, b) ((a) > (b) ? (a) : (b))
+#define Alloc(size) malloc(size)
 
 struct Game_Button {
     b32 pressed;
@@ -48,12 +50,13 @@ struct Game_Controller {
         struct {
             Game_Button move_left;
             Game_Button move_right;
+            Game_Button jump;
 
             Game_Button interact;
             Game_Button menu;
         };
 
-        Game_Button buttons[4];
+        Game_Button buttons[5];
     };
 };
 

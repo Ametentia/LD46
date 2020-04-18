@@ -1,9 +1,10 @@
 #include <SFML/System.h>
 #include <SFML/Graphics.h>
-#include <SFML/Audio.H>
+#include <SFML/Audio.h>
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "Ludum.h"
 #include "Ludum.cpp"
@@ -47,6 +48,7 @@ internal void CSFMLHandleInputs(Game_Input *current_input, Game_Input *prev_inpu
     CSFMLProcessGameButton(&current_keyboard->move_right, &prev_keyboard->move_right, sfKeyboard_isKeyPressed(sfKeyD));
     CSFMLProcessGameButton(&current_keyboard->menu, &prev_keyboard->menu, sfKeyboard_isKeyPressed(sfKeyEscape));
     CSFMLProcessGameButton(&current_keyboard->interact, &prev_keyboard->interact, sfKeyboard_isKeyPressed(sfKeyE));
+    CSFMLProcessGameButton(&current_keyboard->jump, &prev_keyboard->jump, sfKeyboard_isKeyPressed(sfKeySpace));
 }
 
 #if LUDUM_WINDOWS
@@ -84,13 +86,14 @@ int main(int argc, char **argv) {
     Game_Input *current_input = &inputs[0];
     Game_Input *prev_input    = &inputs[1];
 
-
     Game_State __state = {};
-    Game_State *state = &__state;
-    state->renderer = global_window;
+    Game_State *state  = &__state;
+    state->renderer    = global_window;
+    state->view        = global_view;
 
     global_running = true;
     sfClock *timer = sfClock_create();
+
     while (global_running) {
         CSFMLHandleInputs(current_input, prev_input);
 

@@ -26,8 +26,8 @@ internal b32 LoadAsset(Asset_Manager *assets, const char *name, Asset_Type type)
     if (slot->occupied) {
         slot = slot->next;
         while (slot) {
-            slot = slot->next;
             if (!slot->occupied) { break; }
+            slot = slot->next;
         }
 
         if (!slot) {
