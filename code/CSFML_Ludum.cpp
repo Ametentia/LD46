@@ -1,6 +1,6 @@
 #include <SFML/System.h>
 #include <SFML/Graphics.h>
-#include <SFML/Audio.H>
+#include <SFML/Audio.h>
 
 #include <stdio.h>
 
