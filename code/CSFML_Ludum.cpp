@@ -49,6 +49,10 @@ internal void CSFMLHandleInputs(Game_Input *current_input, Game_Input *prev_inpu
     CSFMLProcessGameButton(&current_keyboard->menu, &prev_keyboard->menu, sfKeyboard_isKeyPressed(sfKeyEscape));
     CSFMLProcessGameButton(&current_keyboard->interact, &prev_keyboard->interact, sfKeyboard_isKeyPressed(sfKeyE));
     CSFMLProcessGameButton(&current_keyboard->jump, &prev_keyboard->jump, sfKeyboard_isKeyPressed(sfKeySpace));
+
+    CSFMLProcessGameButton(&current_input->mouse_buttons[0], &prev_input->mouse_buttons[0], sfMouse_isButtonPressed(sfMouseLeft));
+    CSFMLProcessGameButton(&current_input->mouse_buttons[1], &prev_input->mouse_buttons[1], sfMouse_isButtonPressed(sfMouseRight));
+    CSFMLProcessGameButton(&current_input->mouse_buttons[2], &prev_input->mouse_buttons[2], sfMouse_isButtonPressed(sfMouseMiddle));
 }
 
 #if LUDUM_WINDOWS

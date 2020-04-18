@@ -1,10 +1,10 @@
 #include "Ludum_Assets.cpp"
 
-internal Animation CreateAnimationFromTexture(sfTexture *texture, v2 size, u32 rows, u32 columns) {
+internal Animation CreateAnimationFromTexture(sfTexture *texture, v2 scale, u32 rows, u32 columns, f32 time_per_frame = 0.1f) {
     Animation result;
     result.texture = texture;
 
-    result.size = size;
+    result.scale = scale;
 
     v2 tex_size = V2(sfTexture_getSize(texture));
     result.frame_size.x = tex_size.x / cast(f32) columns;
@@ -15,7 +15,7 @@ internal Animation CreateAnimationFromTexture(sfTexture *texture, v2 size, u32 r
 
     result.total_frames = (rows * columns);
 
-    result.time_per_frame = 0.1f; // @Todo: make this variable?
+    result.time_per_frame = time_per_frame;
     result.current_frame  = 0;
     result.accumulator    = 0;
     result.flip           = false;
@@ -46,8 +46,9 @@ internal void UpdateRenderAnimation(Game_State *state, Animation *animation, v2 
     rect.height = cast(u32) (animation->frame_size.y);
 
     sfSprite_setTextureRect(sprite, rect);
-    sfSprite_setOrigin(sprite, 0.5f * animation->size);
+    sfSprite_setOrigin(sprite, 0.5f * animation->frame_size);
     sfSprite_setPosition(sprite, position);
+    sfSprite_setScale(sprite, animation->scale);
 
     sfRenderWindow_drawSprite(state->renderer, sprite, 0);
 
@@ -65,22 +66,168 @@ internal Level_State *CreateLevelState(Game_State *state, Level_Type type) {
     return result;
 }
 
+
+// @Todo: Maybe this should just return the axis
+internal b32 Overlaps(Bounding_Box *a, Bounding_Box *b) {
+    v2 centre = a->centre - b->centre;
+    v2 size   = a->half_dim + b->half_dim;
+
+    b32 result = (Abs(centre.x) <= size.x) && (Abs(centre.y) <= size.y);
+    return result;
+}
+
+internal u32 GetSmallestAxis(Bounding_Box *a, Bounding_Box *b) {
+    u32 result = 0;
+
+    v2 centre = a->centre - b->centre;
+    v2 size   = a->half_dim + b->half_dim;
+    if (size.x - Abs(centre.x) < (size.y - Abs(centre.y))) {
+        if (centre.x > 0) { result = 1; }
+    }
+    else {
+        if (centre.y < 0) { result = 2; }
+        else { result = 3; }
+    }
+
+    return result;
+}
+
 internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Game_Input *input) {
     if(!playState->initialised) {
         Player *player = &playState->player[0];
         player->position = V2(640, 360);
+        player->half_dim = V2(16, 32);
+        player->velocity = V2(0, 250);
 
         Asset *anim = GetAsset(&state->assets, "PlayerMove");
         Assert(anim);
 
-        playState->debug_anim = CreateAnimationFromTexture(anim->texture, V2(60, 120), 1, 5);
+        Asset *torch = GetAsset(&state->assets, "TorchSheet");
+
+        sfTexture_setSmooth(torch->texture, true);
+        playState->torch_animation = CreateAnimationFromTexture(torch->texture, V2(0.3, 0.3), 4, 4, 0.13f);
+
+        playState->debug_anim = CreateAnimationFromTexture(anim->texture, V2(1, 1), 1, 5);
 
         playState->initialised = true;
     }
 
+    f32 dt = input->delta_time;
+
+    v2 view_size = sfView_getSize(state->view);
+
+    Game_Controller *controller = &input->controllers[0];
     Player *player = &playState->player[0];
 
-    UpdateRenderAnimation(state, &playState->debug_anim, player->position, input->delta_time);
+    if (JustPressed(input->mouse_buttons[0])) {
+        u32 x = cast(u32) (input->mouse_position.x / 64);
+        u32 y = cast(u32) (input->mouse_position.y / 64);
+        Assert(x < 64 && y < 64);
+
+        playState->level[x][y].occupied = true;
+    }
+
+    player->velocity.x = 0;
+    if (IsPressed(controller->move_left)) { player->velocity.x = -180; }
+    else if (IsPressed(controller->move_right)) { player->velocity.x = 180; }
+
+    player->jump_time -= dt;
+    if (IsPressed(controller->jump)) {
+        if (player->on_ground) {
+            player->velocity.y = -125;
+            player->on_ground = false;
+            player->jump_time = 0.5f;
+        }
+        else if (player->jump_time > 0) {
+            player->velocity.y = -125;
+        }
+    }
+
+    player->velocity.x *= (player->on_ground ? 1 : 0.45);
+    player->velocity.y += (dt * 250);
+    player->position += (dt * player->velocity);
+
+    UpdateRenderAnimation(state, &playState->debug_anim, player->position, dt);
+    UpdateRenderAnimation(state, &playState->torch_animation, V2(600, view_size.y - (145.5 / 2)), dt);
+
+    if (player->position.y + player->half_dim.y >= view_size.y) {
+        player->position.y = view_size.y - player->half_dim.y;
+        player->velocity.y = 0;
+        player->on_ground = true;
+    }
+
+    Bounding_Box player_box;
+    player_box.centre   = player->position;
+    player_box.half_dim = player->half_dim;
+
+    sfColor c = sfRed;
+
+    sfRectangleShape *r = sfRectangleShape_create();
+    sfRectangleShape_setOrigin(r, V2(32, 32));
+    sfRectangleShape_setSize(r, V2(64, 64));
+    sfRectangleShape_setFillColor(r, sfTransparent);
+    sfRectangleShape_setOutlineColor(r, c);
+    sfRectangleShape_setOutlineThickness(r, 2);
+
+    v2 grid_pos = V2((64 * cast(u32) (input->mouse_position.x / 64)), (64 * cast(u32) (input->mouse_position.y / 64)));
+    sfRectangleShape_setPosition(r, grid_pos);
+
+    sfRenderWindow_drawRectangleShape(state->renderer, r, 0);
+
+    for (u32 x = 0; x < 64; ++x) {
+        for (u32 y = 0; y < 64; ++y) {
+            if (playState->level[x][y].occupied) {
+                Bounding_Box other = { V2(x * 64, y * 64), V2(32, 32) };
+                if (Overlaps(&player_box, &other)) {
+                    c = sfGreen;
+
+                    v2 full_size = player->half_dim + other.half_dim;
+
+                    u32 axis = GetSmallestAxis(&player_box, &other);
+                    switch (axis) {
+                        case 0: {
+                            player->position.x = other.centre.x - full_size.x;
+                        }
+                        break;
+                        case 1: {
+                            player->position.x = other.centre.x + full_size.x;
+                        }
+                        break;
+                        case 2: {
+                            player->position.y = other.centre.y - full_size.y;
+                            player->velocity.y = 0;
+                            player->on_ground = true;
+                        }
+                        break;
+                        case 3: {
+                            player->position.y = other.centre.y + full_size.y;
+                            player->velocity.y = -0.45f * player->velocity.y;
+                            player->jump_time = 0;
+                        }
+                        break;
+                    }
+                }
+
+                sfRectangleShape_setPosition(r, other.centre);
+                sfRenderWindow_drawRectangleShape(state->renderer, r, 0);
+            }
+        }
+    }
+
+    sfRectangleShape_destroy(r);
+
+    sfRectangleShape *bbox = sfRectangleShape_create();
+
+    sfRectangleShape_setOrigin(bbox, player_box.half_dim);
+    sfRectangleShape_setSize(bbox, 2 * player_box.half_dim);
+    sfRectangleShape_setPosition(bbox, player_box.centre);
+    sfRectangleShape_setFillColor(bbox, sfTransparent);
+    sfRectangleShape_setOutlineColor(bbox, c);
+    sfRectangleShape_setOutlineThickness(bbox, 2);
+
+    sfRenderWindow_drawRectangleShape(state->renderer, bbox, 0);
+
+    sfRectangleShape_destroy(bbox);
 }
 
 internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
@@ -90,6 +237,7 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
         state->player_pos = V2(250, 400);
         InitAssets(&state->assets, 64);
         LoadAsset(&state->assets, "PlayerMove", Asset_Texture);
+        LoadAsset(&state->assets, "TorchSheet", Asset_Texture);
 
         state->initialised = true;
     }
