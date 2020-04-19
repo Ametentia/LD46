@@ -1,3 +1,4 @@
+#define _CRT_SECURE_NO_WARNINGS 1
 #include <SFML/System.h>
 #include <SFML/Graphics.h>
 #include <SFML/Audio.h>
@@ -22,6 +23,7 @@ internal void CSFMLProcessGameButton(Game_Button *current, Game_Button *prev, b3
 
 internal void CSFMLHandleInputs(Game_Input *current_input, Game_Input *prev_input) {
     sfEvent event;
+    current_input->mouse_wheel_delta = 0;
     while (sfRenderWindow_pollEvent(global_window, &event)) {
         switch (event.type) {
             case sfEvtClosed: {
@@ -34,13 +36,19 @@ internal void CSFMLHandleInputs(Game_Input *current_input, Game_Input *prev_inpu
                 global_view_size.y = cast(f32) event.size.height;
             }
             break;
+            case sfEvtMouseWheelScrolled: {
+                current_input->mouse_wheel_delta = event.mouseWheel.x;
+            }
+            break;
 
             default: {} break;
         }
     }
 
     v2i position = sfMouse_getPositionRenderWindow(global_window);
-    current_input->mouse_position = sfRenderWindow_mapPixelToCoords(global_window, position, global_view);
+    const sfView *view = sfRenderWindow_getView(global_window);
+    current_input->mouse_position = sfRenderWindow_mapPixelToCoords(global_window, position, view);
+    current_input->screen_mouse = V2(position.x, position.y);
 
     Game_Controller *current_keyboard = &current_input->controllers[0];
     Game_Controller *prev_keyboard    = &prev_input->controllers[0];
@@ -54,6 +62,20 @@ internal void CSFMLHandleInputs(Game_Input *current_input, Game_Input *prev_inpu
     CSFMLProcessGameButton(&current_input->mouse_buttons[0], &prev_input->mouse_buttons[0], sfMouse_isButtonPressed(sfMouseLeft));
     CSFMLProcessGameButton(&current_input->mouse_buttons[1], &prev_input->mouse_buttons[1], sfMouse_isButtonPressed(sfMouseRight));
     CSFMLProcessGameButton(&current_input->mouse_buttons[2], &prev_input->mouse_buttons[2], sfMouse_isButtonPressed(sfMouseMiddle));
+
+
+    u32 num = 1;
+    for (u32 it = sfKeyF1; it < sfKeyF13; ++it) {
+        CSFMLProcessGameButton(&current_input->f[num], &prev_input->f[num], sfKeyboard_isKeyPressed(cast(sfKeyCode) it));
+        num += 1;
+    }
+
+    CSFMLProcessGameButton(&current_input->debug_next, &prev_input->debug_next, sfKeyboard_isKeyPressed(sfKeyLBracket));
+
+    CSFMLProcessGameButton(&current_input->debug_prev, &prev_input->debug_prev, sfKeyboard_isKeyPressed(sfKeyRBracket));
+
+    CSFMLProcessGameButton(&current_input->debug_up, &prev_input->debug_up, sfKeyboard_isKeyPressed(sfKeyUp));
+    CSFMLProcessGameButton(&current_input->debug_down, &prev_input->debug_down, sfKeyboard_isKeyPressed(sfKeyDown));
 }
 
 #if LUDUM_WINDOWS

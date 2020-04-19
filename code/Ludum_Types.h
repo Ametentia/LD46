@@ -71,6 +71,16 @@ struct Game_Input {
 
     Game_Button mouse_buttons[3];
     v2 mouse_position;
+    v2 screen_mouse;
+    s32 mouse_wheel_delta;
+
+    Game_Button debug_next;
+    Game_Button debug_prev;
+
+    Game_Button debug_up;
+    Game_Button debug_down;
+
+    Game_Button f[13]; // @Note: Offset by 1 to align with F keys. f[0] is not used
 };
 
 internal b32 IsPressed(Game_Button button) {
