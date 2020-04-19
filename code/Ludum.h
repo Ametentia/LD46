@@ -87,6 +87,40 @@ struct Square {
     Bounding_Box box;
 };
 
+struct Particle {
+    b32 active;
+    v2 position;
+    v2 velocity;
+    v2 size;
+    f32 rotation;
+    f32 life_time;
+};
+
+struct ParticleSpawner {
+    v2 centre;
+    v2 half_size;
+    v2 velocity_min;
+    v2 velocity_max;
+    v2 size_min;
+    v2 size_max;
+    v2 rotation_range;
+    v2 life_time_range;
+    b32 strict_x;
+    char* assetName;
+    u32 max_particles;
+    // Rate is particles/second
+    f32 rate;
+    Particle *particles;
+    u8 transparency = 255;
+};
+
+struct Logo_State {
+    b32 initialised = false;
+    f32 delta_rate;
+    f32 rate;
+    f32 opacity;
+};
+
 struct Play_State {
     b32 initialised;
     Player player[1];
@@ -102,19 +136,24 @@ struct Play_State {
     Animation debug_anim;
     Animation candle[3];
 
+    ParticleSpawner rain[1];
+    ParticleSpawner wind[1];
+
     f32 total_time;
     f32 distance_scale;
     sfShader *shader;
 };
 
 enum Level_Type {
-    LevelType_Play
+    LevelType_Play,
+    LevelType_Logo
 };
 
 struct Level_State {
     Level_Type type;
     union {
         Play_State play;
+        Logo_State logo;
     };
     Level_State *next;
 };

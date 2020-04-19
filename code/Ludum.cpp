@@ -76,6 +76,54 @@ internal void UpdateRenderAnimation(Game_State *state, Animation *animation, v2 
     sfSprite_destroy(sprite);
 }
 
+internal void UpdateRenderParticleSpawner(Game_State *state, ParticleSpawner *spawner, f32 delta_time) {
+    u32 i;
+    f32 particle_allowance = 0;
+    for(i = 0; i < spawner->max_particles; i++) {
+        Particle *p = &spawner->particles[i];
+        if(!p->active && particle_allowance < spawner->rate * delta_time) {
+            p->active = true;
+            v2 minSpawnRange = spawner->centre - spawner->half_size;
+            v2 maxSpawnRange = spawner->centre + spawner->half_size;
+            p->position = random(minSpawnRange, maxSpawnRange);
+            p->rotation = random(spawner->rotation_range.x, spawner->rotation_range.y);
+            p->velocity = random(spawner->velocity_min, spawner->velocity_max);
+            p->size = random(spawner->size_min, spawner->size_max);
+            p->life_time = random(spawner->life_time_range.x, spawner->life_time_range.y);
+            particle_allowance++;
+        }
+        p->life_time -= delta_time;
+        if(p->life_time < 0 || p->position.y > 2000) {
+            p->active = false;
+            continue;
+        }
+        p->position += p->velocity * delta_time;
+        if(spawner->strict_x) {
+            if(p->position.x > spawner->centre.x + spawner->half_size.x) {
+                p->position.x -= spawner->half_size.x*2;
+            }
+            else if(p->position.x < spawner->centre.x - spawner->half_size.x) {
+                p->position.x += spawner->half_size.x*2;
+            }
+        }
+        sfRectangleShape *rs = sfRectangleShape_create();
+        sfRectangleShape_setTexture(rs, GetAsset(&state->assets, spawner->assetName)->texture, true);
+        sfRectangleShape_setSize(rs, p->size);
+        sfRectangleShape_setPosition(rs, p->position);
+        sfRectangleShape_setRotation(rs, p->rotation);
+        sfColor col = {
+             255,
+             255,
+             255,
+             spawner->transparency
+        };
+        sfRectangleShape_setFillColor(rs, col);
+        sfRenderWindow_drawRectangleShape(state->renderer, rs, 0);
+        sfRectangleShape_destroy(rs);
+    }
+    return;
+}
+
 internal Level_State *CreateLevelState(Game_State *state, Level_Type type) {
     Level_State *result = cast(Level_State *) Alloc(sizeof(Level_State));
     memset(result, 0, sizeof(Level_State));
@@ -87,6 +135,22 @@ internal Level_State *CreateLevelState(Game_State *state, Level_Type type) {
     return result;
 }
 
+internal Level_State *RemoveLevelState(Game_State *state) {
+    Level_State *result = state->current_state;
+    Assert(result);
+    state->current_state = result->next;
+
+    return result;
+}
+
+
+internal Particle *InitialiseParticlePool(ParticleSpawner *spawner) {
+    Particle *result = cast(Particle *) Alloc(sizeof(Particle) * spawner->max_particles);
+    memset(result, 0, sizeof(Particle) * spawner->max_particles);
+
+    spawner->particles = result;
+    return result;
+}
 
 // @Todo: Maybe this should just return the axis
 internal b32 Overlaps(Bounding_Box *a, Bounding_Box *b) {
@@ -130,7 +194,9 @@ internal void UpdateRenderFireBalls(Game_State *state, Play_State *playState, Ga
             sfCircleShape_setRotation(r, fireball->rotation);
             sfCircleShape_setTexture(r, GetAsset(&state->assets, "Fireball")->texture, false);
 
-            fireball->position = V2(player->position.x + 40, player->position.y-10);
+            Animation *playerAnim = &playState->debug_anim;
+            f32 fireball_offset = playerAnim->flip ? -40 : 40;
+            fireball->position = V2(player->position.x + fireball_offset, player->position.y+5);
             if(JustPressed(controller->interact)) {
                 fireball->held = false;
                 v2 dir = input->mouse_position - fireball->position;
@@ -196,6 +262,37 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
         playState->candle[0] = CreateAnimationFromTexture(candle_low->texture, V2(0.16, 0.16), 1, 3, 0.08f);
         playState->candle[1] = CreateAnimationFromTexture(candle_medium->texture, V2(0.16, 0.16), 1, 3, 0.08f);
         playState->candle[2] = CreateAnimationFromTexture(candle_high->texture, V2(0.16, 0.16), 1, 3, 0.08f);
+
+        ParticleSpawner *rainSpawner = &playState->rain[0];
+        rainSpawner->centre = V2(340, 300);
+        rainSpawner->half_size = V2(1440, 20);
+        rainSpawner->velocity_min = V2(-200, 350);
+        rainSpawner->velocity_max = V2(-180, 450);
+        rainSpawner->size_min = V2(4, 6);
+        rainSpawner->size_max = V2(4, 6);
+        rainSpawner->rotation_range = V2(33, 30);
+        rainSpawner->life_time_range = V2(40, 120);
+        rainSpawner->max_particles = 800;
+        rainSpawner->rate = 20;
+        rainSpawner->assetName = "Rain";
+        rainSpawner->strict_x = true;
+        rainSpawner->transparency = 150;
+        InitialiseParticlePool(rainSpawner);
+
+        ParticleSpawner *windSpawner = &playState->wind[0];
+        windSpawner->centre = V2(340, 300);
+        windSpawner->half_size = V2(10, 10);
+        windSpawner->velocity_min = V2(-10, -10);
+        windSpawner->velocity_max = V2(10, 10);
+        windSpawner->size_min = V2(3, 6);
+        windSpawner->size_max = V2(4, 7);
+        windSpawner->rotation_range = V2(0, 360);
+        windSpawner->life_time_range = V2(0.8, 1);
+        windSpawner->max_particles = 300;
+        windSpawner->rate = 20;
+        windSpawner->assetName = "Fireball";
+        windSpawner->transparency = 255;
+        InitialiseParticlePool(windSpawner);
 
         playState->initialised = true;
 
@@ -351,26 +448,31 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
 
     sfView_setCenter(state->view, new_view_pos);
     sfRenderWindow_setView(state->renderer, state->view);
+    ParticleSpawner *rain = &playState->rain[0];
+    rain->centre.x = player->position.x;
+    UpdateRenderParticleSpawner(state, playState->rain, dt);
+    ParticleSpawner *wind = &playState->wind[0];
+    wind->centre = input->mouse_position;
+    UpdateRenderParticleSpawner(state, playState->wind, dt);
 
     Asset *bg = GetAsset(&state->assets, "Location-01");
     sfRectangleShape *back_rect = sfRectangleShape_create();
     sfRectangleShape_setSize(back_rect, screen_segment_dim);
-
-    sfRenderWindow_drawRectangleShape(state->renderer, back_rect, 0);
-
     sfRectangleShape_setTexture(back_rect, bg->texture, true);
 
     sfRenderWindow_drawRectangleShape(state->renderer, back_rect, 0);
 
     sfRectangleShape_destroy(back_rect);
     sfShader_bind(playState->shader);
-
+    
     UpdateRenderAnimation(state, &playState->torch_animation, V2(600, view_size.y - 145.5), dt);
     UpdateRenderAnimation(state, &playState->debug_anim, player->position, dt);
-    u32 candle = Max(Min(player->health, 2), 0);
-    UpdateRenderAnimation(state, &playState->candle[candle], player->position + V2(40, -20), dt);
-
     sfShader_bind(0);
+    u32 candle = Max(Min(player->health, 2), 0);
+    Animation *playerAnim = &playState->debug_anim;
+    f32 candleAdd = playerAnim->flip ? -40 : 40;
+    UpdateRenderAnimation(state, &playState->candle[candle], player->position + V2(candleAdd, -20), dt);
+
 
     sfCircleShape *li = sfCircleShape_create();
     sfCircleShape_setRadius(li, 5);
@@ -444,7 +546,7 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     sfColor c = sfRed;
 
     sfRectangleShape *r = sfRectangleShape_create();
-   sfRectangleShape_setFillColor(r, sfTransparent);
+    sfRectangleShape_setFillColor(r, sfTransparent);
     sfRectangleShape_setOutlineColor(r, c);
     sfRectangleShape_setOutlineThickness(r, 2);
 
@@ -524,9 +626,44 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     sfRectangleShape_destroy(bbox);
 }
 
+internal void UpdateRenderLogoState(Game_State *state, Logo_State *logo, Game_Input *input) {
+    sfRenderWindow_clear(state->renderer, sfBlack);
+	if(!logo->initialised) {
+		logo->delta_rate = 1.0;
+		logo->rate = 0;
+		logo->opacity = 0;
+		logo->initialised = true;
+	}
+	logo->rate += logo->delta_rate;
+	logo->opacity = Clamp(logo->opacity + input->delta_time * 2.5 * logo->rate, -0.1f, 255.0);
+
+    v2 view_size = sfView_getSize(state->view);
+	sfRectangleShape *logo_rect = sfRectangleShape_create();
+	sfRectangleShape_setPosition(logo_rect, V2((view_size.x-view_size.y)/2, 0));
+	sfRectangleShape_setTexture(logo_rect, GetAsset(&state->assets,"logo")->texture, false);
+	sfRectangleShape_setSize(logo_rect, V2(view_size.y, view_size.y));
+    sfColor logoColour = {
+        255,
+        255,
+        255,
+        cast(u8) logo->opacity
+    };
+	sfRectangleShape_setFillColor(logo_rect, logoColour);
+	sfRenderWindow_drawRectangleShape(state->renderer, logo_rect, NULL);
+	sfRectangleShape_destroy(logo_rect);
+	if(logo->opacity < 0 || IsPressed(input->controllers[0].jump)) {
+		free(RemoveLevelState(state));
+	}
+	else if (logo->rate > 75) {
+        logo->delta_rate = -logo->delta_rate;
+    }
+}
+
 internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
     if (!state->initialised) {
         CreateLevelState(state, LevelType_Play);
+        // TODO RELEASE: Enable logo
+        //CreateLevelState(state, LevelType_Logo);
 
         state->player_pos = V2(250, 400);
         InitAssets(&state->assets, 64);
@@ -538,6 +675,8 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
         LoadAsset(&state->assets, "PNoise", Asset_Texture);
         LoadAsset(&state->assets, "Location-01", Asset_Texture);
         LoadAsset(&state->assets, "Fireball", Asset_Texture);
+        LoadAsset(&state->assets, "Rain", Asset_Texture);
+		LoadAsset(&state->assets, "logo", Asset_Texture);
 
         state->initialised = true;
     }
@@ -549,6 +688,10 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
             UpdateRenderPlayState(state, play, input);
         }
         break;
+        case LevelType_Logo: {
+            Logo_State *logo = &current_state->logo;
+            UpdateRenderLogoState(state, logo, input);
+        }
     }
 
 }
