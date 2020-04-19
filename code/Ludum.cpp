@@ -1,5 +1,123 @@
 #include "Ludum_Assets.cpp"
 
+internal void LoadLevelFromFile(Game_State *state, World *world, const char *filename) {
+    FILE *handle = fopen(filename, "rb");
+
+    Level_Header header;
+    fread(&header, sizeof(Level_Header), 1, handle);
+
+    if (header.signature[0] != 'A' ||
+        header.signature[1] != 'M' ||
+        header.signature[2] != 'T' ||
+        header.signature[3] != 'L')
+    {
+        printf("Failed signature check\n");
+        return;
+    }
+
+    printf("Segment dim is { %d, %d }\n", header.segment_dim[0], header.segment_dim[1]);
+    printf("Entities: %d, Boxes: %d\n", header.total_entity_count, header.total_box_count);
+
+    fread(world->segments, sizeof(world->segments), 1, handle);
+
+    world->entity_count = header.total_entity_count;
+    world->entities = cast(Entity *) Alloc(world->entity_count * sizeof(Entity));
+
+    fread(world->entities, world->entity_count * sizeof(Entity), 1, handle);
+
+    world->box_count = header.total_box_count;
+    world->boxes = cast(Bounding_Box *) Alloc(world->box_count * sizeof(Bounding_Box));
+
+    fread(world->boxes, world->box_count * sizeof(Bounding_Box), 1, handle);
+
+    fclose(handle);
+}
+
+internal void WriteLevelToFile(Game_State *state, Edit_State *edit) {
+    FILE *handle = fopen("Level.aml", "wb");
+
+    // Write out the header
+    u32 total_box_count = 0;
+    u32 total_entity_count = 0;
+    for (u32 x = 0; x < 16; ++x) {
+        for (u32 y = 0; y < 8; ++y) {
+            Edit_Segment *edit_seg = &edit->segments[x][y];
+            total_box_count += edit_seg->box_count;
+            total_entity_count += edit_seg->entity_count;
+        }
+    }
+
+    if (total_box_count == 0 && total_entity_count == 0) {
+        printf("Empty level\n");
+        fclose(handle);
+        return;
+    }
+
+    u8 sig[] = { 'A', 'M', 'T', 'L' };
+    fwrite(sig, 4, 1, handle);
+
+    u32 segment_dim[2] = { 2880, 1440 };
+    fwrite(segment_dim, sizeof(segment_dim), 1, handle);
+
+
+    fwrite(&total_box_count, sizeof(u32), 1, handle);
+    fwrite(&total_entity_count, sizeof(u32), 1, handle);
+
+    u32 running_total_entities = 0;
+    u32 running_total_boxes = 0;
+
+    for (u32 x = 0; x < 16; ++x) {
+        for (u32 y = 0; y < 8; ++y) {
+            Level_Segment segment = {};
+            Edit_Segment *edit_seg = &edit->segments[x][y];
+
+            if (!edit_seg->in_use) {
+                segment.in_use = false;
+            }
+            else {
+                segment.in_use = true;
+                segment.texture_number = edit_seg->texture_index;
+
+                segment.entity_count = edit_seg->entity_count;
+                segment.box_count    = edit_seg->box_count;
+
+                segment.entity_range_start = running_total_entities;
+                segment.box_range_start    = running_total_boxes;
+
+                running_total_entities += segment.entity_count;
+                running_total_boxes += segment.box_count;
+
+                segment.entity_range_one_past_last = running_total_entities;
+                segment.box_range_one_past_last    = running_total_boxes;
+            }
+
+            fwrite(&segment, sizeof(Level_Segment), 1, handle);
+        }
+    }
+
+    for (u32 x = 0; x < 16; ++x) {
+        for (u32 y = 0; y < 8; ++y) {
+            Edit_Segment *edit_seg = &edit->segments[x][y];
+
+            if (edit_seg->in_use) {
+                fwrite(edit_seg->entities, edit_seg->entity_count * sizeof(Entity), 1, handle);
+            }
+
+        }
+    }
+
+    for (u32 x = 0; x < 16; ++x) {
+        for (u32 y = 0; y < 8; ++y) {
+            Edit_Segment *edit_seg = &edit->segments[x][y];
+
+            if (edit_seg->in_use) {
+                fwrite(edit_seg->boxes, edit_seg->box_count * sizeof(Bounding_Box), 1, handle);
+            }
+        }
+    }
+
+    fclose(handle);
+}
 internal Animation CreateAnimationFromTexture(sfTexture *texture, v2 scale, u32 rows, u32 columns, f32 time_per_frame = 0.1f) {
     Animation result;
     result.texture = texture;
@@ -194,7 +312,7 @@ internal void UpdateRenderFireBalls(Game_State *state, Play_State *playState, Ga
             sfCircleShape_setRotation(r, fireball->rotation);
             sfCircleShape_setTexture(r, GetAsset(&state->assets, "Fireball")->texture, false);
 
-            Animation *playerAnim = &playState->debug_anim;
+            Animation *playerAnim = &player->animation;
             f32 fireball_offset = playerAnim->flip ? -40 : 40;
             fireball->position = V2(player->position.x + fireball_offset, player->position.y+5);
             if(JustPressed(controller->interact)) {
@@ -237,28 +355,24 @@ internal void UpdateRenderFireBalls(Game_State *state, Play_State *playState, Ga
 
 internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Game_Input *input) {
     if(!playState->initialised) {
+        LoadLevelFromFile(state, &playState->world, "Level.aml");
         Player *player = &playState->player[0];
         player->position = V2(640, 360);
         player->half_dim = V2(35, 50);
         player->velocity = V2(0, 250);
         player->health = 2;
 
-        Asset *anim = GetAsset(&state->assets, "IbbSheet");
-        Assert(anim);
+        Asset *player_anim  = GetAsset(&state->assets, "Entity01");
+        player->animation = CreateAnimationFromTexture(player_anim->texture, V2(0.16, 0.16), 2, 3, 0.09f);
 
-        Asset *torch = GetAsset(&state->assets, "TorchSheet");
-        Assert(torch);
-
-        Asset *candle_low = GetAsset(&state->assets, "CandleLow");
-        Assert(candle_low);
-        Asset *candle_medium = GetAsset(&state->assets, "CandleMid");
-        Assert(candle_medium);
-        Asset *candle_high = GetAsset(&state->assets, "CandleHigh");
-        Assert(candle_high);
-
+        Asset *torch = GetAsset(&state->assets, "Entity02");
         sfTexture_setSmooth(torch->texture, true);
         playState->torch_animation = CreateAnimationFromTexture(torch->texture, V2(0.6, 0.6), 4, 4, 0.13f);
-        playState->debug_anim = CreateAnimationFromTexture(anim->texture, V2(0.16, 0.16), 2, 3, 0.09f);
+
+        Asset *candle_low = GetAsset(&state->assets, "CandleLow");
+        Asset *candle_medium = GetAsset(&state->assets, "CandleMid");
+        Asset *candle_high = GetAsset(&state->assets, "CandleHigh");
+
         playState->candle[0] = CreateAnimationFromTexture(candle_low->texture, V2(0.16, 0.16), 1, 3, 0.08f);
         playState->candle[1] = CreateAnimationFromTexture(candle_medium->texture, V2(0.16, 0.16), 1, 3, 0.08f);
         playState->candle[2] = CreateAnimationFromTexture(candle_high->texture, V2(0.16, 0.16), 1, 3, 0.08f);
@@ -355,51 +469,42 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
 
     Game_Controller *controller = &input->controllers[0];
     Player *player = &playState->player[0];
-    player->falling = true;
 
     player->velocity.x = 0;
-    Animation *playerAnimation = &playState->debug_anim;
-    if (IsPressed(controller->move_left)) { 
-        player->velocity.x = -220; 
-        playerAnimation->flip = true; 
-        playerAnimation->pause= false; 
+    if (IsPressed(controller->move_left)) {
+        player->velocity.x      = -220;
+        player->animation.flip  = true;
+        player->animation.pause = false;
     }
     else if (IsPressed(controller->move_right)) {
-        player->velocity.x = 220; 
-        playerAnimation->flip = false; 
-        playerAnimation->pause= false; 
+        player->velocity.x = 220;
+        player->animation.flip  = false;
+        player->animation.pause = false;
     }
 
     player->jump_time -= dt;
     if (IsPressed(controller->jump)) {
-        if (player->can_jump && player->fall_time < 0.3 && player->floor_time > 0.04f) {
+        if (HasFlags(player->state_flags, EntityState_OnGround) &&
+                player->fall_time < 0.3 && player->floor_time > 0.04f)
+        {
+            RemoveFlags(&player->state_flags, EntityState_OnGround);
+            AddFlags(&player->state_flags, EntityState_Falling);
+
             player->velocity.y = -350;
-            player->can_jump = false;
-            player->jump_time = 0.3f;
-            player->falling = true;
+            player->jump_time  = 0.3f;
             player->floor_time = 0;
-            playerAnimation->pause = false; 
+
+            player->animation.pause = false;
         }
         else if (player->jump_time > 0) {
-            player->velocity.y -= 830*dt;
+            player->velocity.y -= 830 * dt;
         }
     }
 
-    player->velocity.x *= (player->can_jump ? 1 : 0.85);
+    player->velocity.x *= (HasFlags(player->state_flags, EntityState_OnGround) ? 1 : 0.85);
     player->velocity.y += (dt * 980);
     player->position += (dt * player->velocity);
 
-    if (player->position.y + player->half_dim.y >= screen_segment_dim.y) {
-        player->position.y = screen_segment_dim.y - player->half_dim.y;
-        player->velocity.y = 0;
-        player->on_ground = true;
-        player->can_jump = true;
-        player->floor_time += dt;
-        player->falling = false;
-        player->fall_time = 0;
-    }
-
-    // @Speed: Looking up the noise texture every frame
     Asset *noise = GetAsset(&state->assets, "PNoise");
 
     v2 light_positions[3] = {
@@ -455,7 +560,9 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     wind->centre = input->mouse_position;
     UpdateRenderParticleSpawner(state, playState->wind, dt);
 
-    Asset *bg = GetAsset(&state->assets, "Location-01");
+    sfShader_bind(playState->shader);
+
+    Asset *bg = GetAsset(&state->assets, "Location00");
     sfRectangleShape *back_rect = sfRectangleShape_create();
     sfRectangleShape_setSize(back_rect, screen_segment_dim);
     sfRectangleShape_setTexture(back_rect, bg->texture, true);
@@ -463,16 +570,13 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     sfRenderWindow_drawRectangleShape(state->renderer, back_rect, 0);
 
     sfRectangleShape_destroy(back_rect);
-    sfShader_bind(playState->shader);
-    
-    UpdateRenderAnimation(state, &playState->torch_animation, V2(600, view_size.y - 145.5), dt);
-    UpdateRenderAnimation(state, &playState->debug_anim, player->position, dt);
-    sfShader_bind(0);
+    UpdateRenderAnimation(state, &playState->torch_animation, V2(1500, 1280), dt);
+    UpdateRenderAnimation(state, &player->animation, player->position, dt);
+
     u32 candle = Max(Min(player->health, 2), 0);
-    Animation *playerAnim = &playState->debug_anim;
+    Animation *playerAnim = &player->animation;
     f32 candleAdd = playerAnim->flip ? -40 : 40;
     UpdateRenderAnimation(state, &playState->candle[candle], player->position + V2(candleAdd, -20), dt);
-
 
     sfCircleShape *li = sfCircleShape_create();
     sfCircleShape_setRadius(li, 5);
@@ -494,51 +598,6 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
 
     sfCircleShape_destroy(li);
 
-    if (JustPressed(input->mouse_buttons[0])) {
-        playState->first_mouse_down = input->mouse_position;
-        playState->is_editing = true;
-    }
-
-    if (WasPressed(input->mouse_buttons[0])) {
-        // @Todo: Commit
-        playState->is_editing = false;
-
-        v2 diff = 0.5f * (input->mouse_position - playState->first_mouse_down);
-        diff.x = Abs(diff.x);
-        diff.y = Abs(diff.y);
-
-        v2 min = V2(Min(input->mouse_position.x, playState->first_mouse_down.x),
-                    Min(input->mouse_position.y, playState->first_mouse_down.y));
-
-        Square *next = &playState->level[playState->next_square];
-        playState->next_square += 1;
-
-        next->box.centre   = min + diff;
-        next->box.half_dim = diff;
-        next->occupied = true;
-    }
-
-    if (playState->is_editing) {
-        v2 min = V2(Min(input->mouse_position.x, playState->first_mouse_down.x),
-                    Min(input->mouse_position.y, playState->first_mouse_down.y));
-
-        v2 max = V2(Max(input->mouse_position.x, playState->first_mouse_down.x),
-                    Max(input->mouse_position.y, playState->first_mouse_down.y));
-
-        v2 half_dim = (max - min);
-
-        sfRectangleShape *r = sfRectangleShape_create();
-        sfRectangleShape_setPosition(r, min);
-        sfRectangleShape_setSize(r, half_dim);
-        sfRectangleShape_setFillColor(r, sfTransparent);
-        sfRectangleShape_setOutlineColor(r, sfRed);
-        sfRectangleShape_setOutlineThickness(r, 2);
-
-        sfRenderWindow_drawRectangleShape(state->renderer, r, 0);
-
-        sfRectangleShape_destroy(r);
-    }
-
     Bounding_Box player_box;
     player_box.centre   = player->position;
     player_box.half_dim = player->half_dim;
@@ -550,56 +609,92 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     sfRectangleShape_setOutlineColor(r, c);
     sfRectangleShape_setOutlineThickness(r, 2);
 
-    for (u32 it = 0; it < 128; ++it) {
-        if (playState->level[it].occupied) {
-            Bounding_Box *other = &playState->level[it].box;
-            if (Overlaps(&player_box, other)) {
-                c = sfGreen;
+    World *world = &playState->world;
 
-                v2 full_size = player->half_dim + other->half_dim;
+    for (u32 it = 0; it < world->entity_count; ++it) {
+        Entity *e = &world->entities[it];
 
-                u32 axis = GetSmallestAxis(&player_box, other);
-                switch (axis) {
-                    case 0: {
-                        player->position.x = other->centre.x - full_size.x;
+        if (e->type == EntityType_Rocks) {
+            Asset *texture = GetAsset(&state->assets, "Entity00");
+
+            sfSprite *sprite = sfSprite_create();
+
+            sfVector2u sizeu = sfTexture_getSize(texture->texture);
+            v2 size = V2(sizeu.x, sizeu.y);
+
+            sfSprite_setTexture(sprite, texture->texture, false);
+            sfSprite_setOrigin(sprite, 0.5f * size);
+            sfSprite_setScale(sprite, e->scale);
+            sfSprite_setPosition(sprite, e->position);
+
+            sfRenderWindow_drawSprite(state->renderer, sprite, 0);
+            sfSprite_destroy(sprite);
+        }
+        else {
+        }
+    }
+
+    sfShader_bind(0);
+
+    for (u32 it = 0; it < world->box_count; ++it) {
+        Bounding_Box *box = &world->boxes[it];
+
+        sfRectangleShape_setOrigin(r, box->half_dim);
+        sfRectangleShape_setSize(r, 2 * box->half_dim);
+        sfRectangleShape_setPosition(r, box->centre);
+
+        sfRenderWindow_drawRectangleShape(state->renderer, r, 0);
+
+        if (Overlaps(&player_box, box)) {
+            v2 full_size = player->half_dim + box->half_dim;
+
+            u32 axis = GetSmallestAxis(&player_box, box);
+            switch (axis) {
+                case 0: {
+                    if (HasFlags(box->direction_flags, Direction_Left)) {
+                        player->position.x = box->centre.x - full_size.x;
                     }
-                    break;
-                    case 1: {
-                        player->position.x = other->centre.x + full_size.x;
+                }
+                break;
+                case 1: {
+                    if (HasFlags(box->direction_flags, Direction_Right)) {
+                        player->position.x = box->centre.x + full_size.x;
                     }
-                    break;
-                    case 2: {
-                        player->position.y = other->centre.y - full_size.y;
+                }
+                break;
+                case 2: {
+                    if (HasFlags(box->direction_flags, Direction_Top))
+                    {
+                        player->position.y = box->centre.y - full_size.y;
                         player->velocity.y = 0;
-                        player->on_ground = true;
-                        player->can_jump = true;
-                        player->falling = false;
+
+                        AddFlags(&player->state_flags, EntityState_OnGround);
+                        RemoveFlags(&player->state_flags, EntityState_Falling);
+
                         player->floor_time += dt;
-                        player->fall_time = 0;
+                        player->fall_time   = 0;
                     }
-                    break;
-                    case 3: {
-                        player->position.y = other->centre.y + full_size.y;
+                }
+                break;
+                case 3: {
+                    if (HasFlags(box->direction_flags, Direction_Bottom)) {
+                        player->position.y = box->centre.y + full_size.y;
                         player->velocity.y = -0.45f * player->velocity.y;
                         player->jump_time = 0;
                     }
-                    break;
                 }
+                break;
             }
-
-            sfRectangleShape_setOrigin(r, other->half_dim);
-            sfRectangleShape_setSize(r, 2 * other->half_dim);
-
-            sfRectangleShape_setPosition(r, other->centre);
-            sfRenderWindow_drawRectangleShape(state->renderer, r, 0);
         }
     }
-    if (player->falling) {
+
+    if (HasFlags(player->state_flags, EntityState_Falling)) {
         player->fall_time += dt;
     }
     else {
-        playerAnimation->pause= true; 
+        player->animation.pause= true;
     }
+
     UpdateRenderFireBalls(state, playState, input);
     if(JustPressed(controller->interact) && !player->holding_fireball && !player->fireball_break){
         player->holding_fireball = true;
@@ -621,7 +716,7 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     sfRectangleShape_setOutlineColor(bbox, c);
     sfRectangleShape_setOutlineThickness(bbox, 2);
 
-    //sfRenderWindow_drawRectangleShape(state->renderer, bbox, 0);
+    sfRenderWindow_drawRectangleShape(state->renderer, bbox, 0);
 
     sfRectangleShape_destroy(bbox);
 }
@@ -659,21 +754,394 @@ internal void UpdateRenderLogoState(Game_State *state, Logo_State *logo, Game_In
     }
 }
 
+internal b32 Contains(Bounding_Box *box, v2 point) {
+    b32 result =
+        (point.x >= (box->centre.x - box->half_dim.x)) &&
+        (point.x <= (box->centre.x + box->half_dim.x)) &&
+        (point.y >= (box->centre.y - box->half_dim.y)) &&
+        (point.y <= (box->centre.y + box->half_dim.y));
+
+    return result;
+}
+
+internal void ConvertToEditor(World *world, Edit_State *edit) {
+    for (u32 it = 0; it < 128; ++it) {
+        Edit_Segment *seg = &edit->segments[it / 8][it % 8];
+        Level_Segment *world_seg = &world->segments[it];
+
+        if (!world_seg->in_use) { continue; }
+
+        seg->texture_index = world_seg->texture_number;
+        seg->entity_count = world_seg->entity_count;
+        seg->box_count    = world_seg->box_count;
+
+        CopySize(seg->entities, &world->entities[world_seg->entity_range_start],
+                seg->entity_count * sizeof(Entity));
+
+        CopySize(seg->boxes, &world->boxes[world_seg->box_range_start], seg->box_count * sizeof(Bounding_Box));
+
+        printf("Seg has %d, %d\n", seg->entity_count, seg->box_count);
+    }
+
+    edit->current_segment = &edit->segments[0][6];
+}
+
+internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *input) {
+    v2 segment_dim = V2(2880, 1440);
+
+    if (!edit->initialised) {
+        edit->mode = EditMode_Segment;
+
+        Edit_Segment *segment = &edit->segments[0][0];
+        segment->grid_x = 0;
+        segment->grid_y = 0;
+        segment->texture_index = 0;
+
+        segment->entity_count = 0;
+        segment->box_count = 0;
+
+        edit->current_segment = segment;
+
+        edit->zoom_factor = 1;
+        edit->last_mouse = V2(0, 0);
+        edit->camera_pos = V2(0, 0);
+        edit->edit_view = sfView_create();
+        sfView_setCenter(edit->edit_view, edit->camera_pos);
+        sfView_setSize(edit->edit_view, V2(1280, 720));
+
+        edit->segments[0][6].in_use = true;
+
+        edit->entity_scales[0] = V2(0.6, 0.6);
+        edit->entity_scales[1] = V2(0.16, 0.16);
+        edit->entity_scales[2] = V2(0.6, 0.6);
+
+        edit->displacement = {};
+
+        edit->animations[1] = CreateAnimationFromTexture(GetAsset(&state->assets, "Entity01")->texture,
+                V2(0.16, 0.16), 2, 3, 0.09f);
+
+        edit->animations[2] = CreateAnimationFromTexture(GetAsset(&state->assets, "Entity02")->texture,
+                V2(0.6, 0.6), 4, 4, 0.13f);
+
+        edit->initialised = true;
+    }
+
+    if (JustPressed(input->f[6])) { WriteLevelToFile(state, edit); }
+    if (JustPressed(input->f[7])) {
+        World world = {};
+        LoadLevelFromFile(state, &world, "Level.aml");
+        ConvertToEditor(&world, edit);
+    }
+
+    // @Note: Camera controls
+    if (IsPressed(input->mouse_buttons[2])) {
+        v2 displacement = edit->zoom_factor * (edit->last_mouse - input->screen_mouse);
+        sfView_move(edit->edit_view, displacement);
+    }
+
+    if (input->mouse_wheel_delta > 0) {
+        edit->zoom_factor *= (1.0f / 1.3f);
+        sfView_zoom(edit->edit_view, 1.0f / 1.3f);
+    }
+    else if (input->mouse_wheel_delta < 0) {
+        edit->zoom_factor *= 1.3f;
+        sfView_zoom(edit->edit_view, 1.3f);
+    }
+
+    edit->last_mouse = input->screen_mouse;
+    sfRenderWindow_setView(state->renderer, edit->edit_view);
+
+
+    if (JustPressed(input->f[1])) {
+        edit->mode = EditMode_BoundingBox;
+    }
+    else if (JustPressed(input->f[2])) {
+        edit->mode = EditMode_Entity;
+    }
+    else if (JustPressed(input->f[3])) {
+        edit->mode = EditMode_Segment;
+    }
+
+    s32 grid_x = cast(s32) (input->mouse_position.x / segment_dim.x);
+    s32 grid_y = cast(u32) (input->mouse_position.y / segment_dim.y);
+
+    switch (edit->mode) {
+        case EditMode_BoundingBox: {
+            if (JustPressed(input->mouse_buttons[0])) {
+                edit->first_mouse_down = input->mouse_position;
+                edit->is_editing = true;
+            }
+
+            if (edit->is_editing && WasPressed(input->mouse_buttons[0])) {
+                Assert(edit->is_editing);
+
+                edit->is_editing = false;
+
+                v2 diff = 0.5f * (input->mouse_position - edit->first_mouse_down);
+                diff.x = Abs(diff.x);
+                diff.y = Abs(diff.y);
+
+                v2 min = V2(Min(input->mouse_position.x, edit->first_mouse_down.x),
+                            Min(input->mouse_position.y, edit->first_mouse_down.y));
+
+                Bounding_Box *next = &edit->current_segment->boxes[edit->current_segment->box_count];
+                edit->current_segment->box_count += 1;
+
+                next->direction_flags = Direction_Top; // (Direction_All & ~Direction_Bottom);
+                next->centre   = min + diff;
+                next->half_dim = diff;
+            }
+
+            if (JustPressed(input->mouse_buttons[1])) {
+                Edit_Segment *current = edit->current_segment;
+                for (u32 it = 0; it < current->box_count; ++it) {
+                    if (Contains(&current->boxes[it], input->mouse_position)) {
+                        current->box_count -= 1;
+                        Swap(current->boxes[it], current->boxes[current->box_count]);
+                    }
+                }
+            }
+        }
+        break;
+        case EditMode_Entity: {
+            if (JustPressed(input->debug_next)) {
+                edit->entity_type += 1;
+                if (edit->entity_type >= EntityType_Count) { edit->entity_type = 0; }
+            }
+            else if (JustPressed(input->debug_prev)) {
+                edit->entity_type -= 1;
+                if (edit->entity_type < 0) { edit->entity_type = EntityType_Count - 1; }
+            }
+
+            if (JustPressed(input->mouse_buttons[0])) {
+                Entity *next = &edit->current_segment->entities[edit->current_segment->entity_count];
+                edit->current_segment->entity_count += 1;
+
+                next->type = edit->entity_type;
+                next->position = input->mouse_position;
+                next->scale = edit->entity_scales[next->type];
+            }
+        }
+        break;
+        case EditMode_Segment: {
+            if (JustPressed(input->mouse_buttons[0])) {
+                if (grid_x >= 0 && grid_x < 16) {
+                    if (grid_y >= 0 && grid_y < 8) {
+                        edit->current_segment = &edit->segments[grid_x][grid_y];
+                        edit->current_segment->in_use = true;
+
+                        sfFloatRect rect = {};
+                        rect.top  = 0;
+                        rect.left = 0;
+                        rect.width = 1280;
+                        rect.height = 720;
+                        sfView_reset(edit->edit_view, rect);
+
+                        v2 centre = V2(grid_x * segment_dim.x, grid_y * segment_dim.y) + (0.5f * segment_dim);
+                        sfView_setCenter(edit->edit_view, centre);
+                        sfView_zoom(edit->edit_view, 2.5);
+
+                        sfRenderWindow_setView(state->renderer, edit->edit_view);
+
+                        edit->zoom_factor = 2.5f;
+                        edit->camera_pos = V2(0, 0);
+                    }
+                }
+            }
+
+            if (JustPressed(input->debug_next)) {
+                edit->current_segment->texture_index += 1;
+                if (edit->current_segment->texture_index >= 4) {
+                    edit->current_segment->texture_index = 0;
+                }
+            }
+            else if (JustPressed(input->debug_prev)) {
+                edit->current_segment->texture_index -= 1;
+                if (edit->current_segment->texture_index < 0) {
+                    edit->current_segment->texture_index = 3;
+                }
+            }
+
+            if (IsPressed(input->debug_up)) {
+                edit->displacement.y -= 2;
+            }
+
+            if (IsPressed(input->debug_down)) {
+                edit->displacement.y += 2;
+            }
+        }
+        break;
+    }
+
+    v2 offset = 0.05 * segment_dim;
+    sfRectangleShape *rect = sfRectangleShape_create();
+    for (s32 x = 0; x < 16; ++x) {
+        for (s32 y = 0; y < 8; ++y) {
+            Edit_Segment *segment = &edit->segments[x][y];
+            if (segment->in_use) {
+                char name[256];
+                snprintf(name, sizeof(name), "Location%02d", segment->texture_index);
+                Asset *texture = GetAsset(&state->assets, name);
+
+                sfRectangleShape_setOrigin(rect, V2(0, 0));
+                sfRectangleShape_setTexture(rect, texture->texture, false);
+                sfRectangleShape_setSize(rect, segment_dim);
+
+                v2 pos = V2(x * segment_dim.x, y * segment_dim.y);
+                sfRectangleShape_setPosition(rect, pos);
+            }
+            else {
+                sfRectangleShape_setOrigin(rect, 0.5f * offset);
+                sfRectangleShape_setTexture(rect, 0, false);
+                sfRectangleShape_setSize(rect, 0.95 * segment_dim);
+                sfRectangleShape_setPosition(rect, V2(x * segment_dim.x + offset.x, y * segment_dim.y + offset.y));
+            }
+
+            if ((x == grid_x) && (y == grid_y)) {
+                if (edit->mode != EditMode_Segment || (segment == edit->current_segment)) {}
+                else {
+                    sfRectangleShape_setFillColor(rect, sfYellow);
+                }
+            }
+            else {
+                sfRectangleShape_setFillColor(rect, sfWhite);
+            }
+
+            sfRenderWindow_drawRectangleShape(state->renderer, rect, 0);
+        }
+    }
+
+    sfRectangleShape_destroy(rect);
+
+    Edit_Segment *segment = edit->current_segment;
+    sfRectangleShape *shape = sfRectangleShape_create();
+
+
+    sfSprite *sprite = sfSprite_create();
+    for (u32 it = 0; it < segment->entity_count; ++it) {
+        Entity *entity = &segment->entities[it];
+
+        char name[256];
+        snprintf(name, sizeof(name), "Entity%02d", entity->type);
+        Asset *texture = GetAsset(&state->assets, name);
+        Assert(texture);
+
+        if (texture->flags & AssetFlag_Animation) {
+            UpdateRenderAnimation(state, &edit->animations[entity->type],
+                    entity->position, input->delta_time);
+        }
+        else {
+            sfSprite *sprite = sfSprite_create();
+
+            sfVector2u sizeu = sfTexture_getSize(texture->texture);
+            v2 size = V2(sizeu.x, sizeu.y);
+
+            sfSprite_setTexture(sprite, texture->texture, false);
+            sfSprite_setOrigin(sprite, 0.5f * size);
+            sfSprite_setScale(sprite, entity->scale);
+            sfSprite_setPosition(sprite, entity->position);
+
+            sfRenderWindow_drawSprite(state->renderer, sprite, 0);
+        }
+    }
+
+    sfSprite_destroy(sprite);
+
+    sfRectangleShape_setFillColor(shape, sfTransparent);
+    sfRectangleShape_setOutlineColor(shape, sfRed);
+    sfRectangleShape_setOutlineThickness(shape, 1.5);
+
+    for (u32 it = 0; it < segment->box_count; ++it) {
+        Bounding_Box *box = &segment->boxes[it];
+
+        sfRectangleShape_setOrigin(shape, box->half_dim);
+        sfRectangleShape_setPosition(shape, box->centre);
+        sfRectangleShape_setSize(shape, 2 * box->half_dim);
+
+        sfRenderWindow_drawRectangleShape(state->renderer, shape, 0);
+    }
+
+    sfRectangleShape_destroy(shape);
+
+    switch (edit->mode) {
+        case EditMode_BoundingBox: {
+            if (edit->is_editing) {
+                if (JustPressed(input->mouse_buttons[1])) { edit->is_editing = false; }
+
+                v2 min = V2(Min(input->mouse_position.x, edit->first_mouse_down.x),
+                            Min(input->mouse_position.y, edit->first_mouse_down.y));
+
+                v2 max = V2(Max(input->mouse_position.x, edit->first_mouse_down.x),
+                            Max(input->mouse_position.y, edit->first_mouse_down.y));
+
+                v2 half_dim = (max - min);
+
+                sfRectangleShape *r = sfRectangleShape_create();
+                sfRectangleShape_setPosition(r, min);
+                sfRectangleShape_setSize(r, half_dim);
+                sfRectangleShape_setFillColor(r, sfTransparent);
+                sfRectangleShape_setOutlineColor(r, sfRed);
+                sfRectangleShape_setOutlineThickness(r, 2);
+
+                sfRenderWindow_drawRectangleShape(state->renderer, r, 0);
+
+                sfRectangleShape_destroy(r);
+            }
+        }
+        break;
+        case EditMode_Entity: {
+            char name[256];
+            snprintf(name, sizeof(name), "Entity%02d", edit->entity_type);
+            Asset *texture = GetAsset(&state->assets, name);
+            Assert(texture);
+
+            if (texture->flags & AssetFlag_Animation) {
+                UpdateRenderAnimation(state, &edit->animations[edit->entity_type],
+                        input->mouse_position, input->delta_time);
+            }
+            else {
+                sfSprite *sprite = sfSprite_create();
+
+                sfVector2u sizeu = sfTexture_getSize(texture->texture);
+                v2 size = V2(sizeu.x, sizeu.y);
+
+                sfSprite_setTexture(sprite, texture->texture, false);
+                sfSprite_setOrigin(sprite, 0.5f * size);
+                sfSprite_setScale(sprite, edit->entity_scales[edit->entity_type]);
+                sfSprite_setPosition(sprite, input->mouse_position);
+
+                sfRenderWindow_drawSprite(state->renderer, sprite, 0);
+
+                sfSprite_destroy(sprite);
+            }
+        }
+        break;
+    }
+}
+
 internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
     if (!state->initialised) {
-        CreateLevelState(state, LevelType_Play);
+        CreateLevelState(state, LevelType_Edit);
         // TODO RELEASE: Enable logo
         //CreateLevelState(state, LevelType_Logo);
 
         state->player_pos = V2(250, 400);
         InitAssets(&state->assets, 64);
-        LoadAsset(&state->assets, "IbbSheet", Asset_Texture);
-        LoadAsset(&state->assets, "TorchSheet", Asset_Texture);
+
+        LoadAsset(&state->assets, "Entity00", Asset_Texture);
+        LoadAsset(&state->assets, "Entity01", Asset_Texture, AssetFlag_Animation);
+        LoadAsset(&state->assets, "Entity02", Asset_Texture, AssetFlag_Animation);
+
+        LoadAsset(&state->assets, "Location00", Asset_Texture);
+        LoadAsset(&state->assets, "Location01", Asset_Texture);
+        LoadAsset(&state->assets, "Location02", Asset_Texture);
+        LoadAsset(&state->assets, "Location03", Asset_Texture);
+
+        // @Temp: These are still in for backwards comp
         LoadAsset(&state->assets, "CandleLow", Asset_Texture);
         LoadAsset(&state->assets, "CandleMid", Asset_Texture);
         LoadAsset(&state->assets, "CandleHigh", Asset_Texture);
         LoadAsset(&state->assets, "PNoise", Asset_Texture);
-        LoadAsset(&state->assets, "Location-01", Asset_Texture);
         LoadAsset(&state->assets, "Fireball", Asset_Texture);
         LoadAsset(&state->assets, "Rain", Asset_Texture);
 		LoadAsset(&state->assets, "logo", Asset_Texture);
@@ -692,6 +1160,12 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
             Logo_State *logo = &current_state->logo;
             UpdateRenderLogoState(state, logo, input);
         }
+        break;
+        case LevelType_Edit: {
+            Edit_State *edit = &current_state->edit;
+            UpdateRenderEdit(state, edit, input);
+        }
+        break;
     }
 
 }

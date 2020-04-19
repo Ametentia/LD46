@@ -104,4 +104,9 @@ internal v3 V3(f32 x, f32 y, f32 z) {
     return result;
 }
 
+internal b32 Between(f32 value, f32 min, f32 max) {
+    b32 result = (value >= min && value <= max);
+    return result;
+}
+
 #endif  // LUDUM_MATHS_H_

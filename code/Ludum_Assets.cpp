@@ -16,7 +16,7 @@ internal u32 HashAssetName(const char *name) {
     return result;
 }
 
-internal b32 LoadAsset(Asset_Manager *assets, const char *name, Asset_Type type) {
+internal b32 LoadAsset(Asset_Manager *assets, const char *name, Asset_Type type, u32 flags = 0) {
     b32 result = false;
 
     u32 hash_index = HashAssetName(name);
@@ -41,6 +41,8 @@ internal b32 LoadAsset(Asset_Manager *assets, const char *name, Asset_Type type)
 
     slot->type = type;
     slot->name = name;
+
+    slot->flags = flags;
 
     char buf[1024];
 
