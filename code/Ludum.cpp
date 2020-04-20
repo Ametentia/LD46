@@ -653,13 +653,13 @@ internal void UpdateChaseBubbles(Game_State *state, Play_State *playState, Game_
             u32 offset = (u32)floor(i/500)*2;
             v2 dir = spawnlines[0 + offset] - spawnlines[1 + offset];
             f32 len = Length(dir); 
-            v2 spawnpoint = spawnlines[0] - (dir * cast (f32) (1.0/sqrt(len)) * random(0, len));
+            v2 spawnpoint = spawnlines[0 + offset] - (dir * cast (f32) (1.0/len) * random(0, len));
             bubble->position = spawnpoint;
-            bubble->radius = random(60, 90);
+            bubble->radius = random(50, 60);
         }
         bubble->position += V2(random(-3, 3)*dt, random(-3, 3)*dt);
-        bubble->radius -= random(50, 60)*dt;
-        if(bubble->radius < 10) {
+        bubble->radius -= random(40, 50)*dt;
+        if(bubble->radius < 15) {
             bubble->active = false;
             continue;
         }
@@ -909,64 +909,6 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                     UpdateRenderAnimation(state, &entity->animation, entity->position, dt);
                 }
                 break;
-                case EntityType_DarkWall: {
-                    if(HasFlags(entity->flags, EntityState_Active)) {
-
-                        entity->half_dim += V2(200, 200) * dt;
-                        Bounding_Box player_box = CreateBox(player->position, player->half_dim);
-                        Bounding_Box wall_box = CreateBox(entity->position, entity->half_dim);
-                        if(Overlaps(&wall_box, &player_box)) {
-                            // TODO : Player dead!
-                            Assert(false);
-                        }
-                        v2 pos = entity->position;
-                        v2 size = entity->half_dim;
-                        v2 line[8] = {
-                            V2(pos.x+size.x, pos.y+size.y),
-                            V2(pos.x+size.x, pos.y-size.y),
-                            V2(pos.x-size.x, pos.y-size.y),
-                            V2(pos.x-size.x, pos.y+size.y),
-                            V2(pos.x-size.x, pos.y+size.y),
-                            V2(pos.x+size.x, pos.y+size.y),
-                            V2(pos.x+size.x, pos.y-size.y),
-                            V2(pos.x-size.x, pos.y-size.y),
-                        };
-                        sfRectangleShape *dis_rect = sfRectangleShape_create();
-                        sfRectangleShape_setPosition(dis_rect, entity->position);
-                        sfRectangleShape_setTexture(dis_rect, GetAsset(&state->assets,"logo")->texture, false);
-                        sfRectangleShape_setSize(dis_rect, entity->half_dim*2);
-                        sfRectangleShape_setOrigin(dis_rect, entity->half_dim);
-                        sfColor rect_col = {0,0,0,255};
-                        sfRectangleShape_setFillColor(dis_rect, rect_col);
-                        sfRenderWindow_drawRectangleShape(state->renderer, dis_rect, NULL);
-                        sfRectangleShape_destroy(dis_rect);
-                        UpdateChaseBubbles(state, playState, input, line);
-                    } else if(Length(entity->half_dim) > 1){
-                        entity->half_dim -= V2(500, 500) * dt;
-                        v2 pos = entity->position;
-                        v2 size = entity->half_dim;
-                        v2 line[8] = {
-                            V2(pos.x+size.x, pos.y+size.y),
-                            V2(pos.x+size.x, pos.y-size.y),
-                            V2(pos.x-size.x, pos.y-size.y),
-                            V2(pos.x-size.x, pos.y+size.y),
-                            V2(pos.x-size.x, pos.y+size.y),
-                            V2(pos.x+size.x, pos.y+size.y),
-                            V2(pos.x+size.x, pos.y-size.y),
-                            V2(pos.x-size.x, pos.y-size.y),
-                        };
-                        sfRectangleShape *dis_rect = sfRectangleShape_create();
-                        sfRectangleShape_setPosition(dis_rect, entity->position);
-                        sfRectangleShape_setTexture(dis_rect, GetAsset(&state->assets,"logo")->texture, false);
-                        sfRectangleShape_setSize(dis_rect, entity->half_dim*2);
-                        sfRectangleShape_setOrigin(dis_rect, entity->half_dim);
-                        sfColor rect_col = {0,0,0,255};
-                        sfRectangleShape_setFillColor(dis_rect, rect_col);
-                        sfRenderWindow_drawRectangleShape(state->renderer, dis_rect, NULL);
-                        sfRectangleShape_destroy(dis_rect);
-                        UpdateChaseBubbles(state, playState, input, line);
-                    }
-                }
                 case EntityType_Tentacle: {
                     UpdateRenderAnimation(state, &entity->animation, entity->position, dt);
                 }
@@ -989,6 +931,46 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                 entity->position += (dt * entity->velocity);
             }
             break;
+            case EntityType_DarkWall: {
+                if(HasFlags(entity->flags, EntityState_Active)) {
+
+                    entity->half_dim += V2(75, 75) * dt;
+                    Bounding_Box player_box = CreateBox(player->position, player->half_dim);
+                    Bounding_Box wall_box = CreateBox(entity->position, entity->half_dim);
+                    if(Overlaps(&wall_box, &player_box)) {
+                        // TODO : Player dead!
+                        Assert(false);
+                    }
+                    v2 pos = entity->position;
+                    v2 size = entity->half_dim;
+                    v2 line[8] = {
+                        V2(pos.x - size.x, pos.y - size.y),
+                        V2(pos.x - size.x, pos.y + size.y),
+
+                        V2(pos.x + size.x, pos.y - size.y),
+                        V2(pos.x + size.x, pos.y + size.y),
+
+                        V2(pos.x - size.x, pos.y + size.y),
+                        V2(pos.x + size.x, pos.y + size.y),
+
+                        V2(pos.x - size.x, pos.y - size.y),
+                        V2(pos.x + size.x, pos.y - size.y),
+                    };
+                    sfRectangleShape *dis_rect = sfRectangleShape_create();
+                    sfRectangleShape_setOrigin(dis_rect, entity->half_dim);
+                    sfRectangleShape_setPosition(dis_rect, entity->position);
+                    sfRectangleShape_setSize(dis_rect, entity->half_dim*2);
+                    sfColor rect_col = {0,0,0,255};
+                    sfRectangleShape_setFillColor(dis_rect, rect_col);
+                    sfRenderWindow_drawRectangleShape(state->renderer, dis_rect, NULL);
+                    sfRectangleShape_destroy(dis_rect);
+                    UpdateChaseBubbles(state, playState, input, line);
+                } else if(Length(entity->half_dim) > 1){
+                    entity->half_dim -= V2(500, 500) * dt;
+                    v2 pos = entity->position;
+                }
+            }
+            break;
             case EntityType_Fireball: {
             }
             break;
@@ -1001,10 +983,11 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     if(JustPressed(controller->interact)) {
         Entity *e = GetNextScratchEntity(world);
         e->type = EntityType_DarkWall;
+        e->half_dim = V2(10,10);
         AddFlags(&e->flags, EntityState_Active);
         v2 dir = playState->player_spawn - player->position;
-        f32 len = length(dir);
-        e->position = view_size.x/2 * dir * (1/sqrt(len));
+        f32 len = Length(dir);
+        e->position = player->position - view_size.x * dir * (1/len);
         printf("Spawned\n");
     }
 
