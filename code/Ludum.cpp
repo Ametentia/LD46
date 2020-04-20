@@ -4,14 +4,164 @@
 
 #if 0
 internal void AddFireBall(Play_State *playState) {
+=======
+internal void LoadLevelFromFile(Game_State *state, World *world, const char *filename) {
+    FILE *handle = fopen(filename, "rb");
+
+    Level_Header header;
+    fread(&header, sizeof(Level_Header), 1, handle);
+
+    if (header.signature[0] != 'A' ||
+        header.signature[1] != 'M' ||
+        header.signature[2] != 'T' ||
+        header.signature[3] != 'L')
+    {
+        printf("Failed signature check\n");
+        return;
+    }
+
+    printf("Segment dim is { %d, %d }\n", header.segment_dim[0], header.segment_dim[1]);
+    printf("Entities: %d, Boxes: %d\n", header.total_entity_count, header.total_box_count);
+
+    fread(world->segments, sizeof(world->segments), 1, handle);
+
+    world->entity_count = header.total_entity_count;
+    world->entities = cast(Entity *) Alloc(world->entity_count * sizeof(Entity));
+
+    fread(world->entities, world->entity_count * sizeof(Entity), 1, handle);
+
+    world->box_count = header.total_box_count;
+    world->boxes = cast(Bounding_Box *) Alloc(world->box_count * sizeof(Bounding_Box));
+
+    fread(world->boxes, world->box_count * sizeof(Bounding_Box), 1, handle);
+
+    fclose(handle);
+}
+
+internal void WriteLevelToFile(Game_State *state, Edit_State *edit) {
+    FILE *handle = fopen("Level.aml", "wb");
+
+    // Write out the header
+    u32 total_box_count = 0;
+    u32 total_entity_count = 0;
+    for (u32 x = 0; x < 16; ++x) {
+        for (u32 y = 0; y < 8; ++y) {
+            Edit_Segment *edit_seg = &edit->segments[x][y];
+            total_box_count += edit_seg->box_count;
+            total_entity_count += edit_seg->entity_count;
+        }
+    }
+
+    if (total_box_count == 0 && total_entity_count == 0) {
+        printf("Empty level\n");
+        fclose(handle);
+        return;
+    }
+
+    u8 sig[] = { 'A', 'M', 'T', 'L' };
+    fwrite(sig, 4, 1, handle);
+
+    u32 segment_dim[2] = { 2880, 1440 };
+    fwrite(segment_dim, sizeof(segment_dim), 1, handle);
+
+
+    fwrite(&total_box_count, sizeof(u32), 1, handle);
+    fwrite(&total_entity_count, sizeof(u32), 1, handle);
+
+    u32 running_total_entities = 0;
+    u32 running_total_boxes = 0;
+
+    for (u32 x = 0; x < 16; ++x) {
+        for (u32 y = 0; y < 8; ++y) {
+            Level_Segment segment = {};
+            Edit_Segment *edit_seg = &edit->segments[x][y];
+
+            if (!edit_seg->in_use) {
+                segment.in_use = false;
+            }
+            else {
+                segment.in_use = true;
+                segment.texture_number = edit_seg->texture_index;
+
+                segment.entity_count = edit_seg->entity_count;
+                segment.box_count    = edit_seg->box_count;
+
+                segment.entity_range_start = running_total_entities;
+                segment.box_range_start    = running_total_boxes;
+
+                running_total_entities += segment.entity_count;
+                running_total_boxes += segment.box_count;
+
+                segment.entity_range_one_past_last = running_total_entities;
+                segment.box_range_one_past_last    = running_total_boxes;
+            }
+
+            fwrite(&segment, sizeof(Level_Segment), 1, handle);
+        }
+    }
+
+    for (u32 x = 0; x < 16; ++x) {
+        for (u32 y = 0; y < 8; ++y) {
+            Edit_Segment *edit_seg = &edit->segments[x][y];
+
+            if (edit_seg->in_use) {
+                fwrite(edit_seg->entities, edit_seg->entity_count * sizeof(Entity), 1, handle);
+            }
+
+        }
+    }
+
+    for (u32 x = 0; x < 16; ++x) {
+        for (u32 y = 0; y < 8; ++y) {
+            Edit_Segment *edit_seg = &edit->segments[x][y];
+
+            if (edit_seg->in_use) {
+                fwrite(edit_seg->boxes, edit_seg->box_count * sizeof(Bounding_Box), 1, handle);
+            }
+        }
+    }
+
+    fclose(handle);
+}
+
+internal Animation CreateAnimationFromTexture(sfTexture *texture, v2 scale, u32 rows, u32 columns, f32 time_per_frame = 0.1f) {
+    Animation result;
+    result.texture = texture;
+
+    result.scale = scale;
+
+    v2 tex_size = V2(sfTexture_getSize(texture));
+    result.frame_size.x = tex_size.x / cast(f32) columns;
+    result.frame_size.y = tex_size.y / cast(f32) rows;
+
+    result.rows = rows;
+    result.columns = columns;
+
+    result.total_frames = (rows * columns);
+
+    result.time_per_frame = time_per_frame;
+    result.current_frame  = 0;
+    result.accumulator    = 0;
+    result.flip           = false;
+    result.pause          = false;
+
+    return result;
+}
+
+internal void AddFireBall(Play_State *playState, Game_Input *input) {
+>>>>>>> remotes/origin/matt
     for(u8 i = 0; i < 3; i++) {
         Fire_Ball *fireball = &playState->fire_balls[i];
         Player *player = &playState->player[0];
         if(!fireball->active) {
             fireball->active = true;
-            fireball->held = true;
             fireball->radius = 15;
-            player->holding_fireball = true;
+            fireball->position = player->position;
+            v2 dir = input->mouse_position - fireball->position;
+            f32 len = length(dir);
+            fireball->velocity = 100 * dir * (1/sqrt(len));
+            Player *player = &playState->player[0];
+            player->fireball_break = true;
             return;
         }
     }
@@ -81,37 +231,9 @@ internal void UpdateRenderFireBalls(Game_State *state, Play_State *playState, Ga
         Player *player = &playState->player[0];
         Game_Controller *controller = &input->controllers[0];
 
-
-        if(fireball->held) {
-            fireball->rotation-=90*input->delta_time;
-            sfCircleShape *r = sfCircleShape_create();
-            sfCircleShape_setRadius(r, fireball->radius);
-            sfCircleShape_setOrigin(r, V2(fireball->radius, fireball->radius));
-            sfCircleShape_setRotation(r, fireball->rotation);
-            sfCircleShape_setTexture(r, GetAsset(&state->assets, "Fireball")->texture, false);
-
-            Animation *playerAnim = &player->animation;
-            f32 fireball_offset = playerAnim->flip ? -40 : 40;
-            fireball->position = V2(player->position.x + fireball_offset, player->position.y+5);
-            if(JustPressed(controller->interact)) {
-                fireball->held = false;
-                v2 dir = input->mouse_position - fireball->position;
-                f32 len = length(dir);
-                fireball->velocity = 3 * dir * (1/sqrt(len));
-                player->holding_fireball = false;
-                player->fireball_break = true;
-            }
-
-            sfCircleShape_setPosition(r, fireball->position);
-            sfRenderWindow_drawCircleShape(state->renderer, r, 0);
-            sfCircleShape_destroy(r);
-            continue;
-        }
-        else {
-            fireball->rotation-=360*input->delta_time;
-        }
+        fireball->rotation-=360*input->delta_time;
         if(length(fireball->velocity) < 30000) {
-            fireball->velocity += fireball->velocity * 100 * input->delta_time;
+            fireball->velocity += fireball->velocity * 300 * input->delta_time;
         }
         if(fireball->radius < 3) {
             fireball->active = false;
@@ -197,6 +319,54 @@ internal Level_State *RemoveLevelState(Game_State *state) {
 //
 //
 //
+
+internal void MusicHandlerUpdate(Game_State *state, MusicLayers *layers, f32 time_per_frame) {
+    if(!layers->initialised) {
+        layers->initialised = true;
+        layers->play_time = 0;
+        Asset *organ = GetAsset(&state->assets, "organ");
+        // TODO: Use a settings volume
+        sfMusic_setVolume(organ->music, 5);
+        sfMusic_play(organ->music);
+        sfMusic_setLoop(organ->music, true);
+    }
+    layers->play_time += time_per_frame;
+    Music_State *tracks[4] = {
+        &layers->swell,
+        &layers->arpeggio,
+        &layers->drums,
+        &layers->hat
+    };
+    const char *assetNames[4] {
+        "swell",
+        "arpeggio",
+        "drums",
+        "hat"
+    };
+    for(u32 i = 0; i < 4; i++) {
+        if(*tracks[i] == Music_Request) {
+            Asset *organ = GetAsset(&state->assets, "organ");
+            Assert(organ);
+            f32 organTime = sfTime_asSeconds(sfMusic_getPlayingOffset(organ->music));
+            Asset *asset = GetAsset(&state->assets, assetNames[i]);
+            Assert(asset);
+            sfSoundStatus soundState = sfMusic_getStatus(asset->music);
+            if(soundState == sfStopped && (u32)floor(organTime)%16 == 0) {
+                sfMusic_play(asset->music);
+                sfMusic_setVolume(asset->music, 5);
+                sfMusic_setLoop(asset->music, true);
+                *tracks[i] = Music_Playing;
+            } else if(soundState == sfPlaying && (u32)floor(organTime)%16 == 0) {
+                sfMusic_setPlayingOffset(asset->music, sfTime_Zero);
+                sfMusic_stop(asset->music);
+                *tracks[i] = Music_Stopped;
+            }
+        }
+    }
+    if(layers->play_time > 32) {
+        layers->play_time = 0;
+    }
+}
 
 internal u32 GetActiveLevelSegments(World *world, Level_Segment *output) {
     u32 result = 0;
@@ -468,6 +638,8 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
 
     f32 dt = input->delta_time;
 
+    MusicHandlerUpdate(state, &playState->music[0], dt);
+
     v2 view_size          = sfView_getSize(state->view);
     v2 screen_segment_dim = V2(2880, 1440); // @Todo: This will come from the world
 
@@ -564,138 +736,11 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                 break;
             }
         }
-
-#if 0
-        sfRectangleShape *bbox = sfRectangleShape_create();
-        sfRectangleShape_setFillColor(bbox, sfTransparent);
-        sfRectangleShape_setOutlineColor(bbox, sfRed);
-        sfRectangleShape_setOutlineThickness(bbox, 1.5);
-        for (u32 range = segment->box_range_start;
-                range < segment->box_range_one_past_last;
-                ++range)
-        {
-            Bounding_Box *box = &world->boxes[it];
-            sfRectangleShape_setOrigin(bbox, box->half_dim);
-            sfRectangleShape_setPosition(bbox, box->centre);
-            sfRectangleShape_setSize(bbox, 2 * box->half_dim);
-
-            sfRenderWindow_drawRectangleShape(state->renderer, bbox, 0);
-        }
-
-        sfRectangleShape_destroy(bbox);
-#endif
-
     }
 
     UpdateRenderPlayer(state, playState, input, player);
 
     sfShader_bind(0);
-
-    // @Todo: Reenable lighting
-    // Asset *noise = GetAsset(&state->assets, "PNoise");
-    // sfShader_bind(playState->shader);
-    // sfShader_bind(0);
-
-    // playState->total_time += dt;
-    // sfShader_setTextureUniform(playState->shader, "noise", noise->texture);
-    // sfShader_setFloatUniform(playState->shader, "time", playState->total_time);
-    // sfShader_setFloatUniformArray(playState->shader, "light_distance_scales", light_distance_scales, 3);
-    // sfShader_setVec2UniformArray(playState->shader, "light_positions", light_positions, 3);
-    // sfShader_setVec3UniformArray(playState->shader, "light_colours", light_colours, 3);
-
-
-    // @Todo: Reenable candle.. It should probably be its own entity
-    // u32 candle = Max(Min(player->health, 2), 0);
-    // Animation *playerAnim = &player->animation;
-    // f32 candleAdd = playerAnim->flip ? -40 : 40;
-    // UpdateRenderAnimation(state, &playState->candle[candle], player->position + V2(candleAdd, -20), dt);
-
-#if 0
-    sfColor c = sfRed;
-
-    sfRectangleShape *r = sfRectangleShape_create();
-    sfRectangleShape_setFillColor(r, sfTransparent);
-    sfRectangleShape_setOutlineColor(r, c);
-    sfRectangleShape_setOutlineThickness(r, 2);
-
-    World *world = &playState->world;
-
-    for (u32 it = 0; it < world->entity_count; ++it) {
-        Entity *e = &world->entities[it];
-
-        if (e->type == EntityType_Rocks) {
-            Asset *texture = GetAsset(&state->assets, "Entity00");
-
-            sfSprite *sprite = sfSprite_create();
-
-            sfVector2u sizeu = sfTexture_getSize(texture->texture);
-            v2 size = V2(sizeu.x, sizeu.y);
-
-            sfSprite_setTexture(sprite, texture->texture, false);
-            sfSprite_setOrigin(sprite, 0.5f * size);
-            sfSprite_setScale(sprite, e->scale);
-            sfSprite_setPosition(sprite, e->position);
-
-            sfRenderWindow_drawSprite(state->renderer, sprite, 0);
-            sfSprite_destroy(sprite);
-        }
-        else {
-        }
-    }
-
-    for (u32 it = 0; it < world->box_count; ++it) {
-        Bounding_Box *box = &world->boxes[it];
-
-        sfRectangleShape_setOrigin(r, box->half_dim);
-        sfRectangleShape_setSize(r, 2 * box->half_dim);
-        sfRectangleShape_setPosition(r, box->centre);
-
-        sfRenderWindow_drawRectangleShape(state->renderer, r, 0);
-
-        if (Overlaps(&player_box, box)) {
-            v2 full_size = player->half_dim + box->half_dim;
-
-            u32 axis = GetSmallestAxis(&player_box, box);
-            switch (axis) {
-                case 0: {
-                    if (HasFlags(box->direction_flags, Direction_Left)) {
-                        player->position.x = box->centre.x - full_size.x;
-                    }
-                }
-                break;
-                case 1: {
-                    if (HasFlags(box->direction_flags, Direction_Right)) {
-                        player->position.x = box->centre.x + full_size.x;
-                    }
-                }
-                break;
-                case 2: {
-                    if (HasFlags(box->direction_flags, Direction_Top))
-                    {
-                        player->position.y = box->centre.y - full_size.y;
-                        player->velocity.y = 0;
-
-                        AddFlags(&player->state_flags, EntityState_OnGround);
-                        RemoveFlags(&player->state_flags, EntityState_Falling);
-
-                        player->floor_time += dt;
-                        player->fall_time   = 0;
-                    }
-                }
-                break;
-                case 3: {
-                    if (HasFlags(box->direction_flags, Direction_Bottom)) {
-                        player->position.y = box->centre.y + full_size.y;
-                        player->velocity.y = -0.45f * player->velocity.y;
-                        player->jump_time = 0;
-                    }
-                }
-                break;
-            }
-        }
-    }
-    sfRectangleShape_destroy(r);
-#endif
 
     // @Todo: Reenable UpdateRenderFireBalls(state, playState, input);
     //
@@ -708,6 +753,110 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     //    player->fireball_break = false;
     //}
 
+}
+
+internal void UpdateRenderCredits(Game_State *state, Credits_State *credits, Game_Input *input) {
+    sfRenderWindow_clear(state->renderer, sfBlack);
+    v2 view_size = sfView_getSize(state->view);
+    if(!credits->initialised) {
+        credits->initialised = true;
+    }
+    sfFont *font = GetAsset(&state->assets, "ubuntu")->font;
+    sfText *text = sfText_create();
+    sfText_setFont(text, font);
+    sfText_setCharacterSize(text, 36);
+
+    sfText_setString(text, "Back To Menu");
+    sfFloatRect bounds = sfText_getLocalBounds(text);
+    sfText_setColor(text, sfWhite);
+
+    sfText_setOrigin(text, V2(0, 0));
+    sfText_setPosition(text, V2(bounds.width-bounds.width - 10, bounds.height - 10));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+}
+
+internal void UpdateRenderMenu(Game_State *state, Menu_State *menu, Game_Input *input) {
+    sfRenderWindow_clear(state->renderer, sfBlack);
+    v2 view_size = sfView_getSize(state->view);
+    if(!menu->initialised) {
+        menu->initialised = true;
+    }
+
+    v2 mouse_pos = input->mouse_position;
+    Bounding_Box mouse = {};
+    mouse.centre = mouse_pos;
+    mouse.half_dim = V2(2, 2);
+
+
+    sfFont *font = GetAsset(&state->assets, "ubuntu")->font;
+    sfText *text = sfText_create();
+    sfText_setFont(text, font);
+    sfText_setCharacterSize(text, 36);
+
+    sfText_setString(text, "Quit Game");
+    f32 text_loc = 9*view_size.y/10;
+    sfFloatRect bounds = sfText_getLocalBounds(text);
+    f32 spacing = bounds.height/2 + 30;
+
+    Bounding_Box *b1 = &menu->buttons[0];
+    b1->centre = V2(30 + bounds.width/2, text_loc + bounds.height/2);
+    b1->half_dim = V2(100, bounds.height/2);
+    sfText_setColor(text, sfWhite);
+    if(Overlaps(b1, &mouse)) {
+        sfText_setColor(text, sfRed);
+        if (WasPressed(input->mouse_buttons[0])) {
+            printf("Quit\n");
+        }
+    }
+
+    sfText_setOrigin(text, V2(0, bounds.height/2));
+    sfText_setPosition(text, V2(30, text_loc));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+
+    sfText_setString(text, "Credits");
+    bounds = sfText_getLocalBounds(text);
+    text_loc -= spacing;
+    b1->centre = V2(30 + bounds.width/2, text_loc + bounds.height/2);
+    b1->half_dim = V2(100, bounds.height/2);
+    sfText_setColor(text, sfWhite);
+    if(Overlaps(b1, &mouse)) {
+        sfText_setColor(text, sfRed);
+        if (WasPressed(input->mouse_buttons[0])) {
+            CreateLevelState(state, LevelType_Logo);
+        }
+    }
+
+    sfText_setOrigin(text, V2(0, bounds.height/2));
+    sfText_setPosition(text, V2(30, text_loc));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+
+    sfText_setString(text, "Start");
+    bounds = sfText_getLocalBounds(text);
+    text_loc -= spacing;
+
+    b1->centre = V2(30 + bounds.width/2, text_loc + bounds.height/2);
+    b1->half_dim = V2(100, bounds.height/2);
+
+    sfText_setColor(text, sfWhite);
+    if(Overlaps(b1, &mouse)) {
+        sfText_setColor(text, sfRed);
+        if (WasPressed(input->mouse_buttons[0])) {
+            free(RemoveLevelState(state));
+        }
+    }
+
+    sfText_setOrigin(text, V2(0, bounds.height/2));
+    sfText_setPosition(text, V2(30, text_loc));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+
+    sfText_setColor(text, sfWhite);
+    sfText_setString(text, "Candle Light");
+    sfText_setCharacterSize(text, 72);
+    bounds = sfText_getLocalBounds(text);
+    sfText_setOrigin(text, V2(bounds.width / 2, bounds.height / 2));
+    sfText_setPosition(text, V2(view_size.x/2, view_size.y/10));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+    sfText_destroy(text);
 }
 
 internal void UpdateRenderLogoState(Game_State *state, Logo_State *logo, Game_Input *input) {
@@ -744,36 +893,14 @@ internal void UpdateRenderLogoState(Game_State *state, Logo_State *logo, Game_In
     }
 }
 
-internal void ConvertToEditor(World *world, Edit_State *edit) {
-    for (u32 it = 0; it < 128; ++it) {
-        Edit_Segment *seg = &edit->segments[it / 8][it % 8];
-        Level_Segment *world_seg = &world->segments[it];
-
-        if (!world_seg->in_use) { continue; }
-
-        seg->texture_index = world_seg->texture_number;
-        seg->entity_count = world_seg->entity_count;
-        seg->box_count    = world_seg->box_count;
-
-        CopySize(seg->entities, &world->entities[world_seg->entity_range_start],
-                seg->entity_count * sizeof(Entity));
-
-        CopySize(seg->boxes, &world->boxes[world_seg->box_range_start], seg->box_count * sizeof(Bounding_Box));
-
-        printf("Seg has %d, %d\n", seg->entity_count, seg->box_count);
-    }
-
-    edit->current_segment = &edit->segments[0][6];
-}
-
 internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
     if (!state->initialised) {
         //CreateLevelState(state, LevelType_Edit);
         CreateLevelState(state, LevelType_Play);
         // TODO RELEASE: Enable logo
+        CreateLevelState(state, LevelType_Menu);
         //CreateLevelState(state, LevelType_Logo);
 
-        state->player_pos = V2(250, 400);
         InitAssets(&state->assets, 64);
 
         LoadAsset(&state->assets, "Entity00", Asset_Texture);
@@ -783,6 +910,7 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
         LoadAsset(&state->assets, "Entity04", Asset_Texture, AssetFlag_Animation);
         LoadAsset(&state->assets, "Entity05", Asset_Texture, AssetFlag_Animation);
         LoadAsset(&state->assets, "Entity06", Asset_Texture, AssetFlag_Animation);
+
 
         LoadAsset(&state->assets, "Location00", Asset_Texture);
         LoadAsset(&state->assets, "Location01", Asset_Texture);
@@ -800,6 +928,16 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
         LoadAsset(&state->assets, "Rain", Asset_Texture);
 		LoadAsset(&state->assets, "logo", Asset_Texture);
 
+        // Music
+        LoadAsset(&state->assets, "organ", Asset_Music);
+        LoadAsset(&state->assets, "swell", Asset_Music);
+        LoadAsset(&state->assets, "arpeggio", Asset_Music);
+        LoadAsset(&state->assets, "drums", Asset_Music);
+        LoadAsset(&state->assets, "hat", Asset_Music);
+
+        // Fonts
+        LoadAsset(&state->assets, "ubuntu", Asset_Font);
+
         const char *vertex_code = R"VERT(
             varying out vec2 frag_position;
 
@@ -807,7 +945,7 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
                 gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
                 gl_TexCoord[0] = gl_TextureMatrix[0] * gl_MultiTexCoord0;
 
-                frag_position = vec2(gl_ModelViewMatrix * gl_Vertex); // vec2(gl_Position.x, gl_Vertex.y);
+                frag_position = vec2(gl_ModelViewMatrix * gl_Vertex);
             }
         )VERT";
 
@@ -866,6 +1004,16 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
         case LevelType_Edit: {
             Edit_State *edit = &current_state->edit;
             UpdateRenderEdit(state, edit, input);
+        }
+        break;
+        case LevelType_Menu: {
+            Menu_State *menu = &current_state->menu;
+            UpdateRenderMenu(state, menu, input);
+        }
+        break;
+        case LevelType_Credits: {
+            Credits_State *credits = &current_state->credits;
+            UpdateRenderCredits(state, credits, input);
         }
         break;
     }

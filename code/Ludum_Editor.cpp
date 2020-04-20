@@ -1,3 +1,25 @@
+internal void ConvertToEditor(World *world, Edit_State *edit) {
+    for (u32 it = 0; it < 128; ++it) {
+        Edit_Segment *seg = &edit->segments[it / 8][it % 8];
+        Level_Segment *world_seg = &world->segments[it];
+
+        if (!world_seg->in_use) { continue; }
+
+        seg->texture_index = world_seg->texture_number;
+        seg->entity_count = world_seg->entity_count;
+        seg->box_count    = world_seg->box_count;
+
+        CopySize(seg->entities, &world->entities[world_seg->entity_range_start],
+                seg->entity_count * sizeof(Entity));
+
+        CopySize(seg->boxes, &world->boxes[world_seg->box_range_start], seg->box_count * sizeof(Bounding_Box));
+
+        printf("Seg has %d, %d\n", seg->entity_count, seg->box_count);
+    }
+
+    edit->current_segment = &edit->segments[0][6];
+}
+
 internal void WriteLevelToFile(Game_State *state, Edit_State *edit, const char *level_name) {
     FILE *handle = fopen(level_name, "wb");
 
