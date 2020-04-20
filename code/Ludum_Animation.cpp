@@ -109,3 +109,16 @@ internal Animation CreateTentacleAnimation(Asset_Manager *assets) {
 
     return result;
 }
+
+internal Animation CreateGoalAnimation(Asset_Manager *assets) {
+    Animation result;
+
+    char name[256];
+    snprintf(name, sizeof(name), "Entity%02d", EntityType_Goal);
+    Asset *asset = GetAsset(assets, name);
+    Assert(asset->type == Asset_Texture);
+
+    result = CreateAnimationFromTexture(asset->texture, V2(0.25, 0.25), 2, 4, 0.15f);
+
+    return result;
+}

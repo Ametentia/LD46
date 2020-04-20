@@ -79,6 +79,7 @@ internal void UploadLightInformation(Game_State *state, Play_State *play_state) 
 
     u32 count = play_state->light_count;
 
+    sfShader_setIntUniform(state->diffuse_shader, "light_count", count);
     sfShader_setFloatUniform(state->diffuse_shader, "time", play_state->total_time);
     sfShader_setFloatUniformArray(state->diffuse_shader, "light_distance_scales", play_state->light_scales, count);
     sfShader_setVec2UniformArray(state->diffuse_shader, "light_positions", play_state->light_positions, count);
@@ -166,22 +167,22 @@ internal u32 GetActiveLevelSegments(World *world, Level_Segment *output) {
 
     if (grid_x != 0) {
         output[result] = world->segments[(8 * (grid_x - 1)) + grid_y];
-        if (output[result].in_use) { result += 1; }
+        if (HasFlags(output[result].flags, LevelSegment_InUse)) { result += 1; }
     }
 
     if (grid_x != 15) {
         output[result] = world->segments[(8 * (grid_x + 1)) + grid_y];
-        if (output[result].in_use) { result += 1; }
+        if (HasFlags(output[result].flags, LevelSegment_InUse)) { result += 1; }
     }
 
     if (grid_y != 0) {
         output[result] = world->segments[(8 * grid_x) + (grid_y - 1)];
-        if (output[result].in_use) { result += 1; }
+        if (HasFlags(output[result].flags, LevelSegment_InUse)) { result += 1; }
     }
 
     if (grid_y != 7) {
         output[result] = world->segments[(8 * grid_x) + (grid_y + 1)];
-        if (output[result].in_use) { result += 1; }
+        if (HasFlags(output[result].flags, LevelSegment_InUse)) { result += 1; }
     }
 
     return result;
@@ -225,6 +226,21 @@ internal void UpdateRenderPlayer(Game_State *state, Play_State *play_state, Game
         }
     }
 
+    if (JustPressed(input->mouse_buttons[0]) && player->health > 1) {
+        player->health -= 1;
+
+        Entity *entity = GetNextScratchEntity(&play_state->world);
+
+        v2 direction = Normalise(input->mouse_position - player->position);
+
+        entity->type = EntityType_Fireball;
+        entity->scale = V2(1, 1);
+        entity->position = player->position + 10 * direction;
+        entity->velocity = 100 * direction;
+
+        AddFlags(&entity->flags, EntityState_Active | EntityState_Lit);
+    }
+
     player->velocity.x *= (HasFlags(player->flags, EntityState_OnGround) ? 1 : 0.85);
     player->velocity.y += (dt * 1300);
     player->position += (dt * player->velocity);
@@ -262,11 +278,20 @@ internal void UpdateRenderPlayer(Game_State *state, Play_State *play_state, Game
         v3 colour = { 0.5, 0.5, 1.0 };
         v2 light_position = player->position + offset;
         AddLight(play_state, light_position, (3 - (player->health - 1)) * 0.06, colour);
-
-        UploadLightInformation(state, play_state);
     }
     else {
-        // @Todo: Render static sprite for the unlit candle
+        sfSprite *sprite = sfSprite_create();
+
+        Asset *asset = GetAsset(&state->assets, "CandleDead");
+        v2 offset = V2(player->animation.flip ? -40 : 40, -20);
+
+        sfSprite_setPosition(sprite, player->position + offset);
+        sfSprite_setScale(sprite, V2(0.16, 0.16));
+        sfSprite_setTexture(sprite, asset->texture, true);
+
+        sfRenderWindow_drawSprite(state->renderer, sprite, 0);
+
+        sfSprite_destroy(sprite);
     }
 
     Level_Segment active[5];
@@ -348,8 +373,14 @@ internal void DrawLevelSegment(Game_State *state, Level_Segment *segment, v2 seg
     Asset *location = GetAsset(&state->assets, name);
     Assert(location->type == Asset_Texture);
 
-    sfRectangleShape_setPosition(level, V2(segment->grid[0] * segment_dim.x, segment->grid[1] * segment_dim.y));
+    v2 scale = V2(1, 1);
+    if (HasFlags(segment->flags, LevelSegment_FlippedX)) { scale.x = -1; }
+    if (HasFlags(segment->flags, LevelSegment_FlippedY)) { scale.y = -1; }
+
+    sfRectangleShape_setOrigin(level, 0.5f * segment_dim);
+    sfRectangleShape_setPosition(level, V2(segment->grid[0] * segment_dim.x, segment->grid[1] * segment_dim.y) + 0.5f * segment_dim);
     sfRectangleShape_setSize(level, segment_dim);
+    sfRectangleShape_setScale(level, scale);
     sfRectangleShape_setTexture(level, location->texture, true);
 
     sfRenderWindow_drawRectangleShape(state->renderer, level, 0);
@@ -364,6 +395,8 @@ internal void DrawStaticEntity(Game_State *state, Entity *entity, Asset *texture
     sfSprite_setTexture(sprite, texture->texture, true);
 
     sfRenderWindow_drawSprite(state->renderer, sprite, 0);
+
+    sfSprite_destroy(sprite);
 }
 
 internal void DrawStaticEntity(Game_State *state, Entity *entity) {
@@ -458,6 +491,11 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                     entity->animation = CreateTentacleAnimation(&state->assets);
                 }
                 break;
+                case EntityType_Goal: {
+                    entity->animation = CreateGoalAnimation(&state->assets);
+                    AddFlags(&entity->flags, EntityState_Unchecked);
+                }
+                break;
             }
         }
 
@@ -499,12 +537,14 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     Level_Segment active[5]; // @Note: The segment the player is currently in and the 4 adjacent segments
     u32 count = GetActiveLevelSegments(world, active);
 
-    if (player->health != 0) {
+    if (player->health != 0 || playState->current_segment_light_count > 0) {
         sfShader_bind(state->diffuse_shader);
     }
     else {
         sfShader_bind(state->ambient_shader);
     }
+
+    playState->current_segment_light_count = 0;
 
     // Prepass to draw all of the segments to make sure they don't overlap entity parts
     for (u32 it = 0; it < count; ++it) {
@@ -524,11 +564,19 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
 
             if (HasFlags(entity->flags, EntityState_Lit)) {
                 AddLight(playState, entity->position, 0.03, V3(1, 1, 1));
+                if (it == 0) { playState->current_segment_light_count += 1; }
             }
 
             switch (entity->type) {
                 case EntityType_Barrel:
                 case EntityType_Painting:
+                case EntityType_Wall:
+                case EntityType_Carpet:
+                case EntityType_Fireplace:
+                case EntityType_Window:
+                case EntityType_Banner:
+                case EntityType_Platform:
+                case EntityType_Pipe:
                 case EntityType_Rocks: {
                     DrawStaticEntity(state, entity);
                 }
@@ -538,14 +586,29 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                     DrawStaticEntity(state, entity);
                 }
                 break;
-                case EntityType_Fireball: {
-                    // @Note: Probably won't happen here
-                    // @Todo: Update direction, size etc.
-                }
-                break;
                 case EntityType_Torch: {
                     if (HasFlags(entity->flags, EntityState_Unchecked)) {
                         Asset *asset = GetAsset(&state->assets, "TorchOff");
+                        DrawStaticEntity(state, entity, asset);
+
+                        Bounding_Box torch_box  = CreateBox(entity->position, entity->half_dim);
+                        Bounding_Box player_box = CreateBox(player->position, player->half_dim);
+
+                        if (JustPressed(controller->interact)) {
+                            if (Overlaps(&torch_box, &player_box)) {
+                                RemoveFlags(&entity->flags, EntityState_Unchecked);
+                                AddFlags(&entity->flags, EntityState_Lit);
+                            }
+                        }
+                    }
+                    else {
+                        UpdateRenderAnimation(state, &entity->animation, entity->position, dt);
+                    }
+                }
+                break;
+                case EntityType_Goal: {
+                    if (HasFlags(entity->flags, EntityState_Unchecked)) {
+                        Asset *asset = GetAsset(&state->assets, "GoalOff");
                         DrawStaticEntity(state, entity, asset);
 
                         Bounding_Box torch_box  = CreateBox(entity->position, entity->half_dim);
@@ -656,6 +719,17 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
         Entity *entity = &world->scratch_entities[it];
         if (!HasFlags(entity->flags, EntityState_Active)) { continue; }
 
+        if (HasFlags(entity->flags, EntityState_Lit)) {
+            switch (entity->type) {
+                case EntityType_Fireball: {
+                    AddLight(playState, entity->position, 0.03 / entity->scale.x, V3(0.6, 0.6, 1));
+                }
+                break;
+            }
+
+            if (it == 0) { playState->current_segment_light_count += 1; }
+        }
+
         switch (entity->type) {
             case EntityType_Wind: {
                 // @Hack: Don't have texture for wind yet
@@ -664,78 +738,123 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                 entity->type = EntityType_Wind;
 
                 entity->position += (dt * entity->velocity);
-                case EntityType_DarkWall: {
-                    if(HasFlags(entity->flags, EntityState_Active)) {
-                        /* @TODO Matt: When the screen is activated run this
-                        v2 dir = playState->player_spawn - player->position;
-                        f32 len = length(dir);
-                        entity->location = view_size.x/2 * dir * (1/sqrt(len));
-                        */
-
-                        entity->half_dim += V2(200, 200) * dt;
-                        Bounding_Box player_box = CreateBox(player->position, player->half_dim);
-                        Bounding_Box wall_box = CreateBox(entity->position, entity->half_dim);
-                        if(Overlaps(&wall_box, &player_box)) {
-                            // TODO : Player dead!
-                            Assert(false);
-                        }
-                        v2 pos = entity->position;
-                        v2 size = entity->half_dim;
-                        v2 line[8] = {
-                            V2(pos.x+size.x, pos.y+size.y),
-                            V2(pos.x+size.x, pos.y-size.y),
-                            V2(pos.x-size.x, pos.y-size.y),
-                            V2(pos.x-size.x, pos.y+size.y),
-                            V2(pos.x-size.x, pos.y+size.y),
-                            V2(pos.x+size.x, pos.y+size.y),
-                            V2(pos.x+size.x, pos.y-size.y),
-                            V2(pos.x-size.x, pos.y-size.y),
-                        };
-                        sfRectangleShape *dis_rect = sfRectangleShape_create();
-                        sfRectangleShape_setPosition(dis_rect, entity->position);
-                        sfRectangleShape_setTexture(dis_rect, GetAsset(&state->assets,"logo")->texture, false);
-                        sfRectangleShape_setSize(dis_rect, entity->half_dim*2);
-                        sfRectangleShape_setOrigin(dis_rect, entity->half_dim);
-                        sfColor rect_col = {0,0,0,255};
-                        sfRectangleShape_setFillColor(dis_rect, rect_col);
-                        sfRenderWindow_drawRectangleShape(state->renderer, dis_rect, NULL);
-                        sfRectangleShape_destroy(dis_rect);
-                        UpdateChaseBubbles(state, playState, input, line);
-                    } else if(Length(entity->half_dim) > 1){
-                        entity->half_dim -= V2(500, 500) * dt;
-                        v2 pos = entity->position;
-                        v2 size = entity->half_dim;
-                        v2 line[8] = {
-                            V2(pos.x+size.x, pos.y+size.y),
-                            V2(pos.x+size.x, pos.y-size.y),
-                            V2(pos.x-size.x, pos.y-size.y),
-                            V2(pos.x-size.x, pos.y+size.y),
-                            V2(pos.x-size.x, pos.y+size.y),
-                            V2(pos.x+size.x, pos.y+size.y),
-                            V2(pos.x+size.x, pos.y-size.y),
-                            V2(pos.x-size.x, pos.y-size.y),
-                        };
-                        sfRectangleShape *dis_rect = sfRectangleShape_create();
-                        sfRectangleShape_setPosition(dis_rect, entity->position);
-                        sfRectangleShape_setTexture(dis_rect, GetAsset(&state->assets,"logo")->texture, false);
-                        sfRectangleShape_setSize(dis_rect, entity->half_dim*2);
-                        sfRectangleShape_setOrigin(dis_rect, entity->half_dim);
-                        sfColor rect_col = {0,0,0,255};
-                        sfRectangleShape_setFillColor(dis_rect, rect_col);
-                        sfRenderWindow_drawRectangleShape(state->renderer, dis_rect, NULL);
-                        sfRectangleShape_destroy(dis_rect);
-                        UpdateChaseBubbles(state, playState, input, line);
-                    }
-                }
             }
             break;
             case EntityType_Fireball: {
+                entity->position += (dt * entity->velocity);
+                entity->scale -= dt * V2(0.18, 0.18);
+
+                DrawStaticEntity(state, entity);
+
+                if (entity->scale.x < 0.1) {
+                    RemoveFlags(&entity->flags, EntityState_Active | EntityState_Lit);
+                    break;
+                }
+
+                Bounding_Box fireball_box = CreateBox(entity->position, entity->half_dim);
+                for (u32 it = 0; it < count; ++it) {
+                    Level_Segment *segment = &active[it];
+
+                    b32 stop = false;
+                    for (u32 range = segment->entity_range_start;
+                            range < segment->entity_range_one_past_last;
+                            ++range)
+                    {
+                        Entity *other = &world->entities[range];
+                        Bounding_Box other_box = CreateBox(other->position, other->half_dim);
+
+                        if (other->type == EntityType_Raghead) {
+                            Bounding_Box other_box = CreateBox(other->position, other->half_dim);
+                            if (Overlaps(&fireball_box, &other_box)) {
+                                RemoveFlags(&entity->flags, EntityState_Active);
+                                RemoveFlags(&other->flags, EntityState_Active);
+                            }
+                        }
+                        else if (other->type == EntityType_Spirit) {
+                            if (Overlaps(&fireball_box, &other_box)) {
+                                RemoveFlags(&entity->flags, EntityState_Active);
+                            }
+
+                            stop = true;
+                            break;
+                        }
+                    }
+
+                    if (stop) { break; } // @Hack: To get out of nested loop
+                }
+            }
+            break;
+            case EntityType_DarkWall: {
+                if(HasFlags(entity->flags, EntityState_Active)) {
+                    /* @TODO Matt: When the screen is activated run this
+                    v2 dir = playState->player_spawn - player->position;
+                    f32 len = length(dir);
+                    entity->location = view_size.x/2 * dir * (1/sqrt(len));
+                    */
+
+                    entity->half_dim += V2(200, 200) * dt;
+                    Bounding_Box player_box = CreateBox(player->position, player->half_dim);
+                    Bounding_Box wall_box = CreateBox(entity->position, entity->half_dim);
+                    if(Overlaps(&wall_box, &player_box)) {
+                        // TODO : Player dead!
+                        Assert(false);
+                    }
+                    v2 pos = entity->position;
+                    v2 size = entity->half_dim;
+                    v2 line[8] = {
+                        V2(pos.x+size.x, pos.y+size.y),
+                        V2(pos.x+size.x, pos.y-size.y),
+                        V2(pos.x-size.x, pos.y-size.y),
+                        V2(pos.x-size.x, pos.y+size.y),
+                        V2(pos.x-size.x, pos.y+size.y),
+                        V2(pos.x+size.x, pos.y+size.y),
+                        V2(pos.x+size.x, pos.y-size.y),
+                        V2(pos.x-size.x, pos.y-size.y),
+                    };
+                    sfRectangleShape *dis_rect = sfRectangleShape_create();
+                    sfRectangleShape_setPosition(dis_rect, entity->position);
+                    sfRectangleShape_setTexture(dis_rect, GetAsset(&state->assets,"logo")->texture, false);
+                    sfRectangleShape_setSize(dis_rect, entity->half_dim*2);
+                    sfRectangleShape_setOrigin(dis_rect, entity->half_dim);
+                    sfColor rect_col = {0,0,0,255};
+                    sfRectangleShape_setFillColor(dis_rect, rect_col);
+                    sfRenderWindow_drawRectangleShape(state->renderer, dis_rect, NULL);
+                    sfRectangleShape_destroy(dis_rect);
+                    UpdateChaseBubbles(state, playState, input, line);
+                } else if(Length(entity->half_dim) > 1){
+                    entity->half_dim -= V2(500, 500) * dt;
+                    v2 pos = entity->position;
+                    v2 size = entity->half_dim;
+                    v2 line[8] = {
+                        V2(pos.x+size.x, pos.y+size.y),
+                        V2(pos.x+size.x, pos.y-size.y),
+                        V2(pos.x-size.x, pos.y-size.y),
+                        V2(pos.x-size.x, pos.y+size.y),
+                        V2(pos.x-size.x, pos.y+size.y),
+                        V2(pos.x+size.x, pos.y+size.y),
+                        V2(pos.x+size.x, pos.y-size.y),
+                        V2(pos.x-size.x, pos.y-size.y),
+                    };
+                    sfRectangleShape *dis_rect = sfRectangleShape_create();
+                    sfRectangleShape_setPosition(dis_rect, entity->position);
+                    sfRectangleShape_setTexture(dis_rect, GetAsset(&state->assets,"logo")->texture, false);
+                    sfRectangleShape_setSize(dis_rect, entity->half_dim*2);
+                    sfRectangleShape_setOrigin(dis_rect, entity->half_dim);
+                    sfColor rect_col = {0,0,0,255};
+                    sfRectangleShape_setFillColor(dis_rect, rect_col);
+                    sfRenderWindow_drawRectangleShape(state->renderer, dis_rect, NULL);
+                    sfRectangleShape_destroy(dis_rect);
+                    UpdateChaseBubbles(state, playState, input, line);
+                }
             }
             break;
         }
     }
 
     UpdateRenderPlayer(state, playState, input, player);
+
+    UploadLightInformation(state, playState);
+
     sfShader_bind(0);
 
     // @Todo: Reenable UpdateRenderFireBalls(state, playState, input);
@@ -909,6 +1028,8 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
             u32 flags = 0;
             if (it >= EntityType_Player) { flags = AssetFlag_Animation; }
 
+            printf("Loading %s ...\n", name);
+
             LoadAsset(&state->assets, name, Asset_Texture, flags);
         }
 
@@ -916,14 +1037,18 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
         LoadAsset(&state->assets, "Location01", Asset_Texture);
         LoadAsset(&state->assets, "Location02", Asset_Texture);
         LoadAsset(&state->assets, "Location03", Asset_Texture);
+        LoadAsset(&state->assets, "Location04", Asset_Texture);
+        LoadAsset(&state->assets, "Location05", Asset_Texture);
 
         LoadAsset(&state->assets, "DarkClouds", Asset_Texture);
 
         LoadAsset(&state->assets, "TorchOff", Asset_Texture);
+        LoadAsset(&state->assets, "GoalOff", Asset_Texture);
 
-        LoadAsset(&state->assets, "CandleLow", Asset_Texture);
-        LoadAsset(&state->assets, "CandleMid", Asset_Texture);
-        LoadAsset(&state->assets, "CandleHigh", Asset_Texture);
+        LoadAsset(&state->assets, "CandleLow", Asset_Texture, AssetFlag_Animation);
+        LoadAsset(&state->assets, "CandleMid", Asset_Texture, AssetFlag_Animation);
+        LoadAsset(&state->assets, "CandleHigh", Asset_Texture, AssetFlag_Animation);
+        LoadAsset(&state->assets, "CandleDead", Asset_Texture);
 
         LoadAsset(&state->assets, "PNoise", Asset_Texture);
 
@@ -964,6 +1089,7 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
             uniform sampler2D image;
 
             // Light Information
+            uniform int light_count;
             uniform vec2 light_positions[MAX_LIGHTS];
             uniform vec3 light_colours[MAX_LIGHTS];
             uniform float light_distance_scales[MAX_LIGHTS];
@@ -973,7 +1099,7 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
 
             void main() {
                 vec3 diffuse = vec3(0, 0, 0);
-                for (int it = 0; it < MAX_LIGHTS; ++it) {
+                for (int it = 0; it < light_count; ++it) {
                     vec2 dir = light_positions[it] - frag_position;
 
                     vec2 noise_uv = vec2(abs(sin(0.1 * time)), abs(cos(0.1 * time)));

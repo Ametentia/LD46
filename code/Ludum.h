@@ -30,8 +30,14 @@ struct Bounding_Box {
 //  [ Entity Array       ]
 //  [ Bounding Box Array ]
 
+enum Level_Segment_Flags {
+    LevelSegment_InUse = 0x1,
+    LevelSegment_FlippedX = 0x2,
+    LevelSegment_FlippedY = 0x4,
+};
+
 struct Level_Segment {
-    b32 in_use;
+    u32 flags;
 
     u32 grid[2]; // For reverse positioning
 
@@ -143,21 +149,26 @@ enum Entity_Type {
     EntityType_Window    = 4,
     EntityType_Banner    = 5,
     EntityType_Barrel    = 6,
+    EntityType_Wall      = 7,
+    EntityType_Platform  = 8,
+    EntityType_Pipe      = 9,
 
     // @Note: Non-animated with effects
-    EntityType_Fireball  = 7,
-    EntityType_Raghead   = 8,
-    EntityType_Statue    = 9,
-    EntityType_Wind      = 10,
+    EntityType_Fireball  = 10,
+    EntityType_Raghead   = 11,
+    EntityType_Statue    = 12,
+    EntityType_Wind      = 13,
 
-    EntityType_DarkWall,
     // @Note: Animated Entities
-    EntityType_Player    = 11,
-    EntityType_Torch     = 12,
-    EntityType_Spirit    = 13,
-    EntityType_Tentacle  = 14,
+    EntityType_Player    = 14,
+    EntityType_Torch     = 15,
+    EntityType_Spirit    = 16,
+    EntityType_Tentacle  = 17,
+    EntityType_Goal      = 18,
 
     EntityType_Count,
+
+    EntityType_DarkWall  = 20,
 
     // @Note: These don't have a texture so I am just putting them out of the way for now
     EntityType_ParticleEmitter = 10000,
@@ -290,11 +301,11 @@ struct Play_State {
     Chase_Bubble *chase_bubbles[2000];
     v2 player_spawn;
 
+    u32 current_segment_light_count;
     u32 light_count;
     v2 light_positions[MAX_LIGHTS];
     f32 light_scales[MAX_LIGHTS];
     v3 light_colours[MAX_LIGHTS];
-
 
     f32 total_time;
     f32 distance_scale;
@@ -304,7 +315,7 @@ struct Play_State {
 // Editor stuff
 //
 struct Edit_Segment {
-    b32 in_use;
+    u32 flags;
 
     s32 texture_index;
 
@@ -435,6 +446,10 @@ internal void RemoveFlags(u32 *flags, u32 remove) {
 
 internal void AddFlags(u32 *flags, u32 add) {
     *flags |= add;
+}
+
+internal void ToggleFlags(u32 *flags, u32 toggle) {
+    *flags ^= toggle;
 }
 
 #include "Ludum_Maths.h"

@@ -103,6 +103,18 @@ internal v2 &operator*=(v2 &a, f32 b) {
     return a;
 }
 
+internal v2 Normalise(v2 v) {
+    v2 result = {};
+
+    f32 length = Length(v);
+    if (length != 0) {
+        result.x = v.x / length;
+        result.y = v.y / length;
+    }
+
+    return result;
+}
+
 
 internal v3 V3(f32 x, f32 y, f32 z) {
     v3 result = { x, y, z };

@@ -3,9 +3,9 @@ internal void ConvertToEditor(World *world, Edit_State *edit) {
         Edit_Segment *seg = &edit->segments[it / 8][it % 8];
         Level_Segment *world_seg = &world->segments[it];
 
-        if (!world_seg->in_use) { continue; }
+        if (!HasFlags(world_seg->flags, LevelSegment_InUse)) { continue; }
 
-        seg->in_use = true;
+        AddFlags(&seg->flags, LevelSegment_InUse);
 
         seg->grid_x = it / 8;
         seg->grid_y = it % 8;
@@ -71,11 +71,12 @@ internal void WriteLevelToFile(Game_State *state, Edit_State *edit, const char *
             segment.grid[0] = x;
             segment.grid[1] = y;
 
-            if (!edit_seg->in_use) {
-                segment.in_use = false;
+            if (!HasFlags(edit_seg->flags, LevelSegment_InUse)) {
+                segment.flags = 0;
             }
             else {
-                segment.in_use = true;
+                segment.flags = edit_seg->flags;
+
                 segment.texture_number = edit_seg->texture_index;
 
                 segment.entity_count = edit_seg->entity_count;
@@ -102,7 +103,7 @@ internal void WriteLevelToFile(Game_State *state, Edit_State *edit, const char *
         for (u32 y = 0; y < 8; ++y) {
             Edit_Segment *edit_seg = &edit->segments[x][y];
 
-            if (edit_seg->in_use) {
+            if (HasFlags(edit_seg->flags, LevelSegment_InUse)) {
                 fwrite(edit_seg->entities, edit_seg->entity_count * sizeof(Entity), 1, handle);
             }
 
@@ -113,7 +114,7 @@ internal void WriteLevelToFile(Game_State *state, Edit_State *edit, const char *
         for (u32 y = 0; y < 8; ++y) {
             Edit_Segment *edit_seg = &edit->segments[x][y];
 
-            if (edit_seg->in_use) {
+            if (HasFlags(edit_seg->flags, LevelSegment_InUse)) {
                 fwrite(edit_seg->boxes, edit_seg->box_count * sizeof(Bounding_Box), 1, handle);
             }
         }
@@ -269,22 +270,34 @@ internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *
             sfRectangleShape_setPosition(grid, position);
             sfRectangleShape_setTexture(grid, 0, false);
 
+
             if (edit->mode == EditMode_Select) {
                 if (grid_x == x && grid_y == y) { sfRectangleShape_setFillColor(grid, sfGreen); }
                 else { sfRectangleShape_setFillColor(grid, sfWhite); }
             }
 
-            if (segment->in_use) {
-                sfRectangleShape_setOrigin(grid, V2(0, 0));
+            v2 scale = V2(1, 1);
+
+            if (HasFlags(segment->flags, LevelSegment_InUse)) {
+                sfRectangleShape_setOrigin(grid, 0.5 * edit->segment_dim);
                 sfRectangleShape_setSize(grid, edit->segment_dim);
 
-                sfRectangleShape_setPosition(grid, V2(x * edit->segment_dim.x, y * edit->segment_dim.y));
+                if (HasFlags(segment->flags, LevelSegment_FlippedX)) { scale.x = -1; }
+                if (HasFlags(segment->flags, LevelSegment_FlippedY)) { scale.y = -1; }
+
+                sfRectangleShape_setScale(grid, scale);
+
+                sfRectangleShape_setPosition(grid, V2(x * edit->segment_dim.x, y * edit->segment_dim.y) +
+                        0.5 * edit->segment_dim);
 
                 char name[256];
                 snprintf(name, sizeof(name), "Location%02d", segment->texture_index);
                 Asset *location = GetAsset(&state->assets, name);
 
                 sfRectangleShape_setTexture(grid, location->texture, false);
+            }
+            else {
+                sfRectangleShape_setScale(grid, scale);
             }
 
             sfRenderWindow_drawRectangleShape(state->renderer, grid, 0);
@@ -319,9 +332,20 @@ internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *
                 if ((grid_x >= 0 && grid_x < 16) && (grid_y >= 0 && grid_y < 8)) {
                     Edit_Segment *segment = &edit->segments[grid_x][grid_y];
 
-                    if (segment->in_use) {
+                    if (HasFlags(segment->flags, LevelSegment_InUse)) {
                         edit->current_segment = segment;
                     }
+
+                }
+            }
+
+            if (edit->current_segment) {
+                if (JustPressed(input->debug_up)) {
+                    ToggleFlags(&edit->current_segment->flags, LevelSegment_FlippedY);
+                }
+
+                if (JustPressed(input->debug_down)) {
+                    ToggleFlags(&edit->current_segment->flags, LevelSegment_FlippedX);
                 }
             }
         }
@@ -331,18 +355,18 @@ internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *
             //
             if (JustPressed(input->debug_next)) {
                 edit->segment_type += 1;
-                if (edit->segment_type >= 3) { edit->segment_type = 0; } // @Hardcoded: Will change
+                if (edit->segment_type >= 6) { edit->segment_type = 0; } // @Hardcoded: Will change
             }
             else if (JustPressed(input->debug_prev)) {
                 edit->segment_type -= 1;
-                if (edit->segment_type < 0) { edit->segment_type = 2; } // @Hardcoded: Will change
+                if (edit->segment_type < 0) { edit->segment_type = 5; } // @Hardcoded: Will change
             }
 
             if (JustPressed(input->mouse_buttons[0])) {
                 if ((grid_x >= 0 && grid_x < 16) && (grid_y >= 0 && grid_y < 8)) {
                     Edit_Segment *segment = &edit->segments[grid_x][grid_y];
 
-                    if (segment->in_use) {
+                    if (HasFlags(segment->flags, LevelSegment_InUse)) {
                         if (segment->texture_index != edit->segment_type) {
                             segment->entity_count = 0;
                             segment->box_count    = 0;
@@ -357,7 +381,7 @@ internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *
                     segment->grid_y = grid_y;
 
                     segment->texture_index = edit->segment_type;
-                    segment->in_use = true;
+                    AddFlags(&segment->flags, LevelSegment_InUse);
                 }
             }
 
@@ -537,6 +561,9 @@ internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *
                                 next->animation = CreateTentacleAnimation(&state->assets);
                             }
                             break;
+                            case EntityType_Goal: {
+                                next->animation = CreateGoalAnimation(&state->assets);
+                            }
                         }
 
                         next->half_dim  = 0.5f * next->animation.frame_size;
@@ -652,6 +679,11 @@ internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *
                         UpdateRenderAnimation(state, &a, input->mouse_position, 0);
                     }
                     break;
+                    case EntityType_Goal: {
+                        Animation a = CreateGoalAnimation(&state->assets);
+                        UpdateRenderAnimation(state, &a, input->mouse_position, 0);
+                    }
+                    break;
                 }
             }
 
@@ -724,333 +756,3 @@ internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *
         break;
     }
 }
-
-#if 0
-internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *input) {
-    v2 segment_dim = V2(2880, 1440);
-
-    if (!edit->initialised) {
-        edit->mode = EditMode_Segment;
-
-        Edit_Segment *segment = &edit->segments[0][0];
-        segment->grid_x = 0;
-        segment->grid_y = 0;
-        segment->texture_index = 0;
-
-        segment->entity_count = 0;
-        segment->box_count = 0;
-
-        edit->current_segment = segment;
-
-        edit->zoom_factor = 1;
-        edit->last_mouse = V2(0, 0);
-        edit->camera_pos = V2(0, 0);
-        edit->edit_view = sfView_create();
-        sfView_setCenter(edit->edit_view, edit->camera_pos);
-        sfView_setSize(edit->edit_view, V2(1280, 720));
-
-        edit->entity_scales[0] = V2(0.6, 0.6);
-        edit->entity_scales[1] = V2(0.16, 0.16);
-        edit->entity_scales[2] = V2(0.6, 0.6);
-
-        edit->displacement = {};
-
-        edit->animations[1] = CreateAnimationFromTexture(GetAsset(&state->assets, "Entity01")->texture,
-                V2(0.16, 0.16), 2, 3, 0.09f);
-
-        edit->animations[2] = CreateAnimationFromTexture(GetAsset(&state->assets, "Entity02")->texture,
-                V2(0.6, 0.6), 4, 4, 0.13f);
-
-        edit->initialised = true;
-    }
-
-    if (JustPressed(input->f[6])) { WriteLevelToFile(state, edit); }
-    if (JustPressed(input->f[7])) {
-        World world = {};
-        LoadLevelFromFile(state, &world, "Level.aml");
-        ConvertToEditor(&world, edit);
-    }
-
-    // @Note: Camera controls
-    if (IsPressed(input->mouse_buttons[2])) {
-        v2 displacement = edit->zoom_factor * (edit->last_mouse - input->screen_mouse);
-        sfView_move(edit->edit_view, displacement);
-    }
-
-    if (input->mouse_wheel_delta > 0) {
-        edit->zoom_factor *= (1.0f / 1.3f);
-        sfView_zoom(edit->edit_view, 1.0f / 1.3f);
-    }
-    else if (input->mouse_wheel_delta < 0) {
-        edit->zoom_factor *= 1.3f;
-        sfView_zoom(edit->edit_view, 1.3f);
-    }
-
-    if (JustPressed(input->f[1])) {
-        edit->mode = EditMode_BoundingBox;
-    }
-    else if (JustPressed(input->f[2])) {
-        edit->mode = EditMode_Entity;
-    }
-    else if (JustPressed(input->f[3])) {
-        edit->mode = EditMode_Segment;
-    }
-
-    s32 grid_x = cast(s32) (input->mouse_position.x / segment_dim.x);
-    s32 grid_y = cast(u32) (input->mouse_position.y / segment_dim.y);
-
-    switch (edit->mode) {
-        case EditMode_BoundingBox: {
-            if (JustPressed(input->mouse_buttons[0])) {
-                edit->first_mouse_down = input->mouse_position;
-                edit->is_editing = true;
-            }
-
-            if (edit->is_editing && WasPressed(input->mouse_buttons[0])) {
-                Assert(edit->is_editing);
-
-                edit->is_editing = false;
-
-                v2 diff = 0.5f * (input->mouse_position - edit->first_mouse_down);
-                diff.x = Abs(diff.x);
-                diff.y = Abs(diff.y);
-
-                v2 min = V2(Min(input->mouse_position.x, edit->first_mouse_down.x),
-                            Min(input->mouse_position.y, edit->first_mouse_down.y));
-
-                Bounding_Box *next = &edit->current_segment->boxes[edit->current_segment->box_count];
-                edit->current_segment->box_count += 1;
-
-                next->direction_flags = Direction_Top; // (Direction_All & ~Direction_Bottom);
-                next->centre   = min + diff;
-                next->half_dim = diff;
-            }
-
-            if (JustPressed(input->mouse_buttons[1])) {
-                Edit_Segment *current = edit->current_segment;
-                for (u32 it = 0; it < current->box_count; ++it) {
-                    if (Contains(&current->boxes[it], input->mouse_position)) {
-                        current->box_count -= 1;
-                        Swap(current->boxes[it], current->boxes[current->box_count]);
-                    }
-                }
-            }
-        }
-        break;
-        case EditMode_Entity: {
-            if (JustPressed(input->debug_next)) {
-                edit->entity_type += 1;
-                if (edit->entity_type >= EntityType_Count) { edit->entity_type = 0; }
-            }
-            else if (JustPressed(input->debug_prev)) {
-                edit->entity_type -= 1;
-                if (edit->entity_type < 0) { edit->entity_type = EntityType_Count - 1; }
-            }
-
-            if (JustPressed(input->mouse_buttons[0])) {
-                Entity *next = &edit->current_segment->entities[edit->current_segment->entity_count];
-                edit->current_segment->entity_count += 1;
-
-                next->type = edit->entity_type;
-                next->position = input->mouse_position;
-                next->scale = edit->entity_scales[next->type];
-            }
-        }
-        break;
-        case EditMode_Segment: {
-            if (JustPressed(input->mouse_buttons[0])) {
-                if (grid_x >= 0 && grid_x < 16) {
-                    if (grid_y >= 0 && grid_y < 8) {
-                        edit->current_segment = &edit->segments[grid_x][grid_y];
-                        edit->current_segment->in_use = true;
-
-                        sfFloatRect rect = {};
-                        rect.top  = 0;
-                        rect.left = 0;
-                        rect.width = 1280;
-                        rect.height = 720;
-                        sfView_reset(edit->edit_view, rect);
-
-                        v2 centre = V2(grid_x * segment_dim.x, grid_y * segment_dim.y) + (0.5f * segment_dim);
-                        sfView_setCenter(edit->edit_view, centre);
-                        sfView_zoom(edit->edit_view, 2.5);
-
-                        sfRenderWindow_setView(state->renderer, edit->edit_view);
-
-                        edit->zoom_factor = 2.5f;
-                        edit->camera_pos = V2(0, 0);
-                    }
-                }
-            }
-
-            if (JustPressed(input->debug_next)) {
-                edit->current_segment->texture_index += 1;
-                if (edit->current_segment->texture_index >= 4) {
-                    edit->current_segment->texture_index = 0;
-                }
-            }
-            else if (JustPressed(input->debug_prev)) {
-                edit->current_segment->texture_index -= 1;
-                if (edit->current_segment->texture_index < 0) {
-                    edit->current_segment->texture_index = 3;
-                }
-            }
-
-            if (IsPressed(input->debug_up)) {
-                edit->displacement.y -= 2;
-            }
-
-            if (IsPressed(input->debug_down)) {
-                edit->displacement.y += 2;
-            }
-        }
-        break;
-    }
-
-    v2 offset = 0.05 * segment_dim;
-    sfRectangleShape *rect = sfRectangleShape_create();
-    for (s32 x = 0; x < 16; ++x) {
-        for (s32 y = 0; y < 8; ++y) {
-            Edit_Segment *segment = &edit->segments[x][y];
-            if (segment->in_use) {
-                char name[256];
-                snprintf(name, sizeof(name), "Location%02d", segment->texture_index);
-                Asset *texture = GetAsset(&state->assets, name);
-
-                sfRectangleShape_setOrigin(rect, V2(0, 0));
-                sfRectangleShape_setTexture(rect, texture->texture, false);
-                sfRectangleShape_setSize(rect, segment_dim);
-
-                v2 pos = V2(x * segment_dim.x, y * segment_dim.y);
-                sfRectangleShape_setPosition(rect, pos);
-            }
-            else {
-                sfRectangleShape_setOrigin(rect, 0.5f * offset);
-                sfRectangleShape_setTexture(rect, 0, false);
-                sfRectangleShape_setSize(rect, 0.95 * segment_dim);
-                sfRectangleShape_setPosition(rect, V2(x * segment_dim.x + offset.x, y * segment_dim.y + offset.y));
-            }
-
-            if ((x == grid_x) && (y == grid_y)) {
-                if (edit->mode != EditMode_Segment || (segment == edit->current_segment)) {}
-                else {
-                    sfRectangleShape_setFillColor(rect, sfYellow);
-                }
-            }
-            else {
-                sfRectangleShape_setFillColor(rect, sfWhite);
-            }
-
-            sfRenderWindow_drawRectangleShape(state->renderer, rect, 0);
-        }
-    }
-
-    sfRectangleShape_destroy(rect);
-
-    Edit_Segment *segment = edit->current_segment;
-    sfRectangleShape *shape = sfRectangleShape_create();
-
-
-    sfSprite *sprite = sfSprite_create();
-    for (u32 it = 0; it < segment->entity_count; ++it) {
-        Entity *entity = &segment->entities[it];
-
-        char name[256];
-        snprintf(name, sizeof(name), "Entity%02d", entity->type);
-        Asset *texture = GetAsset(&state->assets, name);
-        Assert(texture);
-
-        if (texture->flags & AssetFlag_Animation) {
-            UpdateRenderAnimation(state, &edit->animations[entity->type],
-                    entity->position, input->delta_time);
-        }
-        else {
-            sfSprite *sprite = sfSprite_create();
-
-            sfVector2u sizeu = sfTexture_getSize(texture->texture);
-            v2 size = V2(sizeu.x, sizeu.y);
-
-            sfSprite_setTexture(sprite, texture->texture, false);
-            sfSprite_setOrigin(sprite, 0.5f * size);
-            sfSprite_setScale(sprite, entity->scale);
-            sfSprite_setPosition(sprite, entity->position);
-
-            sfRenderWindow_drawSprite(state->renderer, sprite, 0);
-        }
-    }
-
-    sfSprite_destroy(sprite);
-
-    sfRectangleShape_setFillColor(shape, sfTransparent);
-    sfRectangleShape_setOutlineColor(shape, sfRed);
-    sfRectangleShape_setOutlineThickness(shape, 1.5);
-
-    for (u32 it = 0; it < segment->box_count; ++it) {
-        Bounding_Box *box = &segment->boxes[it];
-
-        sfRectangleShape_setOrigin(shape, box->half_dim);
-        sfRectangleShape_setPosition(shape, box->centre);
-        sfRectangleShape_setSize(shape, 2 * box->half_dim);
-
-        sfRenderWindow_drawRectangleShape(state->renderer, shape, 0);
-    }
-
-    sfRectangleShape_destroy(shape);
-
-    switch (edit->mode) {
-        case EditMode_BoundingBox: {
-            if (edit->is_editing) {
-                if (JustPressed(input->mouse_buttons[1])) { edit->is_editing = false; }
-
-                v2 min = V2(Min(input->mouse_position.x, edit->first_mouse_down.x),
-                            Min(input->mouse_position.y, edit->first_mouse_down.y));
-
-                v2 max = V2(Max(input->mouse_position.x, edit->first_mouse_down.x),
-                            Max(input->mouse_position.y, edit->first_mouse_down.y));
-
-                v2 half_dim = (max - min);
-
-                sfRectangleShape *r = sfRectangleShape_create();
-                sfRectangleShape_setPosition(r, min);
-                sfRectangleShape_setSize(r, half_dim);
-                sfRectangleShape_setFillColor(r, sfTransparent);
-                sfRectangleShape_setOutlineColor(r, sfRed);
-                sfRectangleShape_setOutlineThickness(r, 2);
-
-                sfRenderWindow_drawRectangleShape(state->renderer, r, 0);
-
-                sfRectangleShape_destroy(r);
-            }
-        }
-        break;
-        case EditMode_Entity: {
-            char name[256];
-            snprintf(name, sizeof(name), "Entity%02d", edit->entity_type);
-            Asset *texture = GetAsset(&state->assets, name);
-            Assert(texture);
-
-            if (texture->flags & AssetFlag_Animation) {
-                UpdateRenderAnimation(state, &edit->animations[edit->entity_type],
-                        input->mouse_position, input->delta_time);
-            }
-            else {
-                sfSprite *sprite = sfSprite_create();
-
-                sfVector2u sizeu = sfTexture_getSize(texture->texture);
-                v2 size = V2(sizeu.x, sizeu.y);
-
-                sfSprite_setTexture(sprite, texture->texture, false);
-                sfSprite_setOrigin(sprite, 0.5f * size);
-                sfSprite_setPosition(sprite, input->mouse_position);
-
-                sfRenderWindow_drawSprite(state->renderer, sprite, 0);
-
-                sfSprite_destroy(sprite);
-            }
-        }
-        break;
-    }
-}
-#endif
-
-
