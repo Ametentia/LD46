@@ -68,6 +68,21 @@ enum Asset_Flags {
     AssetFlag_Animation = 0x1,
 };
 
+enum Music_State {
+    Music_Stopped,
+    Music_Request,
+    Music_Playing
+};
+
+struct MusicLayers {
+    b32 initialised;
+    f32 play_time;
+    Music_State swell;
+    Music_State arpeggio;
+    Music_State drums;
+    Music_State hat;
+};
+
 struct Asset {
     b32 occupied;
     u32 flags;
@@ -113,10 +128,15 @@ enum Entity_Type {
     EntityType_Rocks = 0,
     EntityType_Player,
     EntityType_Torch,
+    EntityType_Wind,
 
     EntityType_Count,
 
     EntityType_Light = 10000 // @Note: This doesn't have a texture so I am just putting it out of the way
+};
+
+enum LerpType {
+    LerpType_Linear
 };
 
 struct Entity {
@@ -125,6 +145,10 @@ struct Entity {
     v2 scale;
 
     Bounding_Box box;
+
+    v2 movePoints[8];
+    u32 movePointMax;
+    LerpType moveLerpType;
 };
 
 struct Fire_Ball {
@@ -133,7 +157,6 @@ struct Fire_Ball {
     v2 velocity;
     f32 radius;
     f32 rotation;
-    b32 held;
 };
 
 enum Entity_State_Flags {
@@ -155,7 +178,6 @@ struct Player {
 
     u32 state_flags;
 
-    b32 holding_fireball;
     b32 fireball_break;
 
     v2 position;
@@ -193,7 +215,7 @@ struct ParticleSpawner {
     v2 rotation_range;
     v2 life_time_range;
     b32 strict_x;
-    char* assetName;
+    const char* assetName;
     u32 max_particles;
     // Rate is particles/second
     f32 rate;
@@ -208,6 +230,16 @@ struct Logo_State {
     f32 opacity;
 };
 
+struct Menu_State {
+    b32 initialised = false;
+    Bounding_Box buttons[3];
+};
+
+struct Credits_State {
+    b32 initialised = false;
+    Bounding_Box buttons[1];
+};
+
 struct Play_State {
     b32 initialised;
     Player player[1];
@@ -218,6 +250,7 @@ struct Play_State {
 
     Animation torch_animation;
     Animation candle[3];
+    MusicLayers music[1];
 
     ParticleSpawner rain[1];
     ParticleSpawner wind[1];
@@ -275,7 +308,9 @@ struct Edit_State {
 enum Level_Type {
     LevelType_Play,
     LevelType_Logo,
-    LevelType_Edit
+    LevelType_Edit,
+    LevelType_Menu,
+    LevelType_Credits
 };
 
 struct Level_State {
@@ -284,6 +319,8 @@ struct Level_State {
         Play_State play;
         Logo_State logo;
         Edit_State edit;
+        Menu_State menu;
+        Credits_State credits;
     };
     Level_State *next;
 };

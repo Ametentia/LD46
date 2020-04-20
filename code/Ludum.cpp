@@ -118,6 +118,55 @@ internal void WriteLevelToFile(Game_State *state, Edit_State *edit) {
 
     fclose(handle);
 }
+
+internal void MusicHandlerUpdate(Game_State *state, MusicLayers *layers, f32 time_per_frame) {
+    if(!layers->initialised) {
+        layers->initialised = true;
+        layers->play_time = 0;
+        Asset *organ = GetAsset(&state->assets, "organ");
+        // TODO: Use a settings volume
+        sfMusic_setVolume(organ->music, 5);
+        sfMusic_play(organ->music);
+        sfMusic_setLoop(organ->music, true);
+    }
+    layers->play_time += time_per_frame;
+    Music_State *tracks[4] = {
+        &layers->swell,
+        &layers->arpeggio,
+        &layers->drums,
+        &layers->hat
+    };
+    const char *assetNames[4] {
+        "swell",
+        "arpeggio",
+        "drums",
+        "hat"
+    };
+    for(u32 i = 0; i < 4; i++) {
+        if(*tracks[i] == Music_Request) {
+            Asset *organ = GetAsset(&state->assets, "organ");
+            Assert(organ);
+            f32 organTime = sfTime_asSeconds(sfMusic_getPlayingOffset(organ->music));
+            Asset *asset = GetAsset(&state->assets, assetNames[i]);
+            Assert(asset);
+            sfSoundStatus soundState = sfMusic_getStatus(asset->music);
+            if(soundState == sfStopped && (u32)floor(organTime)%16 == 0) {
+                sfMusic_play(asset->music);
+                sfMusic_setVolume(asset->music, 5);
+                sfMusic_setLoop(asset->music, true);
+                *tracks[i] = Music_Playing;
+            } else if(soundState == sfPlaying && (u32)floor(organTime)%16 == 0) {
+                sfMusic_setPlayingOffset(asset->music, sfTime_Zero);
+                sfMusic_stop(asset->music);
+                *tracks[i] = Music_Stopped;
+            }
+        }
+    }
+    if(layers->play_time > 32) {
+        layers->play_time = 0;
+    }
+}
+
 internal Animation CreateAnimationFromTexture(sfTexture *texture, v2 scale, u32 rows, u32 columns, f32 time_per_frame = 0.1f) {
     Animation result;
     result.texture = texture;
@@ -142,15 +191,19 @@ internal Animation CreateAnimationFromTexture(sfTexture *texture, v2 scale, u32 
     return result;
 }
 
-internal void AddFireBall(Play_State *playState) {
+internal void AddFireBall(Play_State *playState, Game_Input *input) {
     for(u8 i = 0; i < 3; i++) {
         Fire_Ball *fireball = &playState->fire_balls[i];
         Player *player = &playState->player[0];
         if(!fireball->active) {
             fireball->active = true;
-            fireball->held = true;
             fireball->radius = 15;
-            player->holding_fireball = true;
+            fireball->position = player->position;
+            v2 dir = input->mouse_position - fireball->position;
+            f32 len = length(dir);
+            fireball->velocity = 100 * dir * (1/sqrt(len));
+            Player *player = &playState->player[0];
+            player->fireball_break = true;
             return;
         }
     }
@@ -303,37 +356,9 @@ internal void UpdateRenderFireBalls(Game_State *state, Play_State *playState, Ga
         Player *player = &playState->player[0];
         Game_Controller *controller = &input->controllers[0];
 
-
-        if(fireball->held) {
-            fireball->rotation-=90*input->delta_time;
-            sfCircleShape *r = sfCircleShape_create();
-            sfCircleShape_setRadius(r, fireball->radius);
-            sfCircleShape_setOrigin(r, V2(fireball->radius, fireball->radius));
-            sfCircleShape_setRotation(r, fireball->rotation);
-            sfCircleShape_setTexture(r, GetAsset(&state->assets, "Fireball")->texture, false);
-
-            Animation *playerAnim = &player->animation;
-            f32 fireball_offset = playerAnim->flip ? -40 : 40;
-            fireball->position = V2(player->position.x + fireball_offset, player->position.y+5);
-            if(JustPressed(controller->interact)) {
-                fireball->held = false;
-                v2 dir = input->mouse_position - fireball->position;
-                f32 len = length(dir);
-                fireball->velocity = 3 * dir * (1/sqrt(len));
-                player->holding_fireball = false;
-                player->fireball_break = true;
-            }
-
-            sfCircleShape_setPosition(r, fireball->position);
-            sfRenderWindow_drawCircleShape(state->renderer, r, 0);
-            sfCircleShape_destroy(r);
-            continue;
-        }
-        else {
-            fireball->rotation-=360*input->delta_time;
-        }
+        fireball->rotation-=360*input->delta_time;
         if(length(fireball->velocity) < 30000) {
-            fireball->velocity += fireball->velocity * 100 * input->delta_time;
+            fireball->velocity += fireball->velocity * 300 * input->delta_time;
         }
         if(fireball->radius < 3) {
             fireball->active = false;
@@ -463,7 +488,7 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     }
 
     f32 dt = input->delta_time;
-
+    MusicHandlerUpdate(state, &playState->music[0], dt);
     v2 view_size = sfView_getSize(state->view);
     v2 screen_segment_dim = V2(2880, 1440);
 
@@ -555,7 +580,7 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     sfRenderWindow_setView(state->renderer, state->view);
     ParticleSpawner *rain = &playState->rain[0];
     rain->centre.x = player->position.x;
-    UpdateRenderParticleSpawner(state, playState->rain, dt);
+    //UpdateRenderParticleSpawner(state, playState->rain, dt);
     ParticleSpawner *wind = &playState->wind[0];
     wind->centre = input->mouse_position;
     UpdateRenderParticleSpawner(state, playState->wind, dt);
@@ -593,7 +618,7 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
 
         sfCircleShape_setFillColor(li, c);
 
-        sfRenderWindow_drawCircleShape(state->renderer, li, 0);
+        //sfRenderWindow_drawCircleShape(state->renderer, li, 0);
     }
 
     sfCircleShape_destroy(li);
@@ -602,7 +627,7 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     player_box.centre   = player->position;
     player_box.half_dim = player->half_dim;
 
-    sfColor c = sfRed;
+    sfColor c = sfTransparent;
 
     sfRectangleShape *r = sfRectangleShape_create();
     sfRectangleShape_setFillColor(r, sfTransparent);
@@ -696,9 +721,8 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     }
 
     UpdateRenderFireBalls(state, playState, input);
-    if(JustPressed(controller->interact) && !player->holding_fireball && !player->fireball_break){
-        player->holding_fireball = true;
-        AddFireBall(playState);
+    if(JustPressed(controller->interact) && !player->fireball_break){
+        AddFireBall(playState, input);
         player->health--;
     }
     else {
@@ -719,6 +743,110 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     sfRenderWindow_drawRectangleShape(state->renderer, bbox, 0);
 
     sfRectangleShape_destroy(bbox);
+}
+
+internal void UpdateRenderCredits(Game_State *state, Credits_State *credits, Game_Input *input) {
+    sfRenderWindow_clear(state->renderer, sfBlack);
+    v2 view_size = sfView_getSize(state->view);
+    if(!credits->initialised) {
+        credits->initialised = true;
+    }
+    sfFont *font = GetAsset(&state->assets, "ubuntu")->font;
+    sfText *text = sfText_create();
+    sfText_setFont(text, font);
+    sfText_setCharacterSize(text, 36);
+
+    sfText_setString(text, "Back To Menu");
+    sfFloatRect bounds = sfText_getLocalBounds(text);
+    sfText_setColor(text, sfWhite);
+
+    sfText_setOrigin(text, V2(0, 0));
+    sfText_setPosition(text, V2(bounds.width-bounds.width - 10, bounds.height - 10));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+}
+
+internal void UpdateRenderMenu(Game_State *state, Menu_State *menu, Game_Input *input) {
+    sfRenderWindow_clear(state->renderer, sfBlack);
+    v2 view_size = sfView_getSize(state->view);
+    if(!menu->initialised) {
+        menu->initialised = true;
+    }
+
+    v2 mouse_pos = input->mouse_position;
+    Bounding_Box mouse = {};
+    mouse.centre = mouse_pos;
+    mouse.half_dim = V2(2, 2);
+    
+
+    sfFont *font = GetAsset(&state->assets, "ubuntu")->font;
+    sfText *text = sfText_create();
+    sfText_setFont(text, font);
+    sfText_setCharacterSize(text, 36);
+
+    sfText_setString(text, "Quit Game");
+    f32 text_loc = 9*view_size.y/10;
+    sfFloatRect bounds = sfText_getLocalBounds(text);
+    f32 spacing = bounds.height/2 + 30;
+
+    Bounding_Box *b1 = &menu->buttons[0];
+    b1->centre = V2(30 + bounds.width/2, text_loc + bounds.height/2);
+    b1->half_dim = V2(100, bounds.height/2);
+    sfText_setColor(text, sfWhite);
+    if(Overlaps(b1, &mouse)) {
+        sfText_setColor(text, sfRed);
+        if (WasPressed(input->mouse_buttons[0])) {
+            printf("Quit\n");
+        }
+    }
+
+    sfText_setOrigin(text, V2(0, bounds.height/2));
+    sfText_setPosition(text, V2(30, text_loc));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+
+    sfText_setString(text, "Credits");
+    bounds = sfText_getLocalBounds(text);
+    text_loc -= spacing;
+    b1->centre = V2(30 + bounds.width/2, text_loc + bounds.height/2);
+    b1->half_dim = V2(100, bounds.height/2);
+    sfText_setColor(text, sfWhite);
+    if(Overlaps(b1, &mouse)) {
+        sfText_setColor(text, sfRed);
+        if (WasPressed(input->mouse_buttons[0])) {
+            CreateLevelState(state, LevelType_Logo);
+        }
+    }
+
+    sfText_setOrigin(text, V2(0, bounds.height/2));
+    sfText_setPosition(text, V2(30, text_loc));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+
+    sfText_setString(text, "Start");
+    bounds = sfText_getLocalBounds(text);
+    text_loc -= spacing;
+
+    b1->centre = V2(30 + bounds.width/2, text_loc + bounds.height/2);
+    b1->half_dim = V2(100, bounds.height/2);
+
+    sfText_setColor(text, sfWhite);
+    if(Overlaps(b1, &mouse)) {
+        sfText_setColor(text, sfRed);
+        if (WasPressed(input->mouse_buttons[0])) {
+            free(RemoveLevelState(state));
+        }
+    }
+
+    sfText_setOrigin(text, V2(0, bounds.height/2));
+    sfText_setPosition(text, V2(30, text_loc));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+
+    sfText_setColor(text, sfWhite);
+    sfText_setString(text, "Candle Light");
+    sfText_setCharacterSize(text, 72);
+    bounds = sfText_getLocalBounds(text);
+    sfText_setOrigin(text, V2(bounds.width / 2, bounds.height / 2));
+    sfText_setPosition(text, V2(view_size.x/2, view_size.y/10));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+    sfText_destroy(text);
 }
 
 internal void UpdateRenderLogoState(Game_State *state, Logo_State *logo, Game_Input *input) {
@@ -1121,8 +1249,9 @@ internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *
 
 internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
     if (!state->initialised) {
-        CreateLevelState(state, LevelType_Edit);
+        CreateLevelState(state, LevelType_Play);
         // TODO RELEASE: Enable logo
+        CreateLevelState(state, LevelType_Menu);
         //CreateLevelState(state, LevelType_Logo);
 
         state->player_pos = V2(250, 400);
@@ -1146,6 +1275,15 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
         LoadAsset(&state->assets, "Rain", Asset_Texture);
 		LoadAsset(&state->assets, "logo", Asset_Texture);
 
+        // Music
+        LoadAsset(&state->assets, "organ", Asset_Music);
+        LoadAsset(&state->assets, "swell", Asset_Music);
+        LoadAsset(&state->assets, "arpeggio", Asset_Music);
+        LoadAsset(&state->assets, "drums", Asset_Music);
+        LoadAsset(&state->assets, "hat", Asset_Music);
+
+        // Fonts
+        LoadAsset(&state->assets, "ubuntu", Asset_Font);
         state->initialised = true;
     }
 
@@ -1164,6 +1302,16 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
         case LevelType_Edit: {
             Edit_State *edit = &current_state->edit;
             UpdateRenderEdit(state, edit, input);
+        }
+        break;
+        case LevelType_Menu: {
+            Menu_State *menu = &current_state->menu;
+            UpdateRenderMenu(state, menu, input);
+        }
+        break;
+        case LevelType_Credits: {
+            Credits_State *credits = &current_state->credits;
+            UpdateRenderCredits(state, credits, input);
         }
         break;
     }
