@@ -1,5 +1,32 @@
 #include "Ludum_Assets.cpp"
 #include "Ludum_Animation.cpp"
+
+//
+// @LevelState: State code
+//
+internal Level_State *CreateLevelState(Game_State *state, Level_Type type) {
+    Level_State *result = cast(Level_State *) Alloc(sizeof(Level_State));
+    memset(result, 0, sizeof(Level_State));
+
+    result->type = type;
+    result->next = state->current_state;
+    state->current_state = result;
+
+    return result;
+}
+
+internal Level_State *RemoveLevelState(Game_State *state) {
+    Level_State *result = state->current_state;
+    Assert(result);
+    state->current_state = result->next;
+
+    return result;
+}
+
+//
+//
+//
+
 #include "Ludum_Editor.cpp"
 
 #if 0
@@ -147,9 +174,8 @@ internal Animation CreateAnimationFromTexture(sfTexture *texture, v2 scale, u32 
 
     return result;
 }
-
+# if 0
 internal void AddFireBall(Play_State *playState, Game_Input *input) {
->>>>>>> remotes/origin/matt
     for(u8 i = 0; i < 3; i++) {
         Fire_Ball *fireball = &playState->fire_balls[i];
         Player *player = &playState->player[0];
@@ -166,6 +192,8 @@ internal void AddFireBall(Play_State *playState, Game_Input *input) {
         }
     }
 }
+*/
+#endif 
 
 internal void UpdateRenderParticleSpawner(Game_State *state, ParticleSpawner *spawner, f32 delta_time) {
     u32 i;
@@ -320,28 +348,6 @@ internal sfSound *GetSound(Play_State *state, sfSoundBuffer *wanted_buffer) {
 }
 
 //
-// @LevelState: State code
-//
-internal Level_State *CreateLevelState(Game_State *state, Level_Type type) {
-    Level_State *result = cast(Level_State *) Alloc(sizeof(Level_State));
-    memset(result, 0, sizeof(Level_State));
-
-    result->type = type;
-    result->next = state->current_state;
-    state->current_state = result;
-
-    return result;
-}
-
-internal Level_State *RemoveLevelState(Game_State *state) {
-    Level_State *result = state->current_state;
-    Assert(result);
-    state->current_state = result->next;
-
-    return result;
-}
-
-//
 //
 //
 
@@ -391,6 +397,17 @@ internal void MusicHandlerUpdate(Game_State *state, MusicLayers *layers, f32 tim
     if(layers->play_time > 32) {
         layers->play_time = 0;
     }
+}
+
+internal Entity *GetNextScratchEntity(World *world) {
+    Entity *result = &world->scratch_entities[world->next_scratch_entity];
+
+    world->next_scratch_entity += 1;
+    if (world->next_scratch_entity >= ArrayCount(world->scratch_entities)) {
+        world->next_scratch_entity = 0;
+    }
+
+    return result;
 }
 
 internal u32 GetActiveLevelSegments(World *world, Level_Segment *output) {
@@ -474,12 +491,12 @@ internal void UpdateRenderPlayer(Game_State *state, Play_State *play_state, Game
 
     if (JustPressed(input->debug_prev)) {
         player->health -= 1;
-        if (player->health > 2) { player->health = 2; }
+        if (player->health > 3) { player->health = 3; }
     }
 
     if (JustPressed(input->debug_next)) {
         player->health += 1;
-        if (player->health > 2) { player->health = 0; }
+        if (player->health > 3) { player->health = 0; }
     }
 
     // @Todo: Better camera code
@@ -495,23 +512,28 @@ internal void UpdateRenderPlayer(Game_State *state, Play_State *play_state, Game
     if (HasFlags(player->flags, EntityState_Falling)) { player->fall_time += dt; }
     else { player->animation.pause = true; }
 
-    u32 candle = Max(Min(player->health, 2), 0);
-    Animation *candle_animation = &play_state->candle[candle];
-    v2 offset = V2(player->animation.flip ? -40 : 40, -20);
+    u32 candle = player->health;
+    if (candle != 0) {
+        Animation *candle_animation = &play_state->candle[candle - 1];
+        v2 offset = V2(player->animation.flip ? -40 : 40, -20);
 
-    UpdateRenderAnimation(state, candle_animation, player->position + offset, dt);
+        UpdateRenderAnimation(state, candle_animation, player->position + offset, dt);
 
-    Asset *noise = GetAsset(&state->assets, "PNoise");
-    sfShader_setTextureUniform(state->lighting_shader, "noise", noise->texture);
+        Asset *noise = GetAsset(&state->assets, "PNoise");
+        sfShader_setTextureUniform(state->diffuse_shader, "noise", noise->texture);
 
-    f32 light_distance_scale = ((3 - player->health) * 0.06);
-    v3 colour = { 0.5, 0.5, 1.0 };
-    v2 light_position = player->position + offset;
+        f32 light_distance_scale = ((3 - (player->health - 1)) * 0.06);
+        v3 colour = { 0.5, 0.5, 1.0 };
+        v2 light_position = player->position + offset;
 
-    sfShader_setFloatUniform(state->lighting_shader, "time", input->delta_time);
-    sfShader_setFloatUniformArray(state->lighting_shader, "light_distance_scales", &light_distance_scale, 1);
-    sfShader_setVec2UniformArray(state->lighting_shader, "light_positions", &light_position, 1);
-    sfShader_setVec3UniformArray(state->lighting_shader, "light_colours", &colour, 1);
+        sfShader_setFloatUniform(state->diffuse_shader, "time", input->delta_time);
+        sfShader_setFloatUniformArray(state->diffuse_shader, "light_distance_scales", &light_distance_scale, 1);
+        sfShader_setVec2UniformArray(state->diffuse_shader, "light_positions", &light_position, 1);
+        sfShader_setVec3UniformArray(state->diffuse_shader, "light_colours", &colour, 1);
+    }
+    else {
+        // @Todo: Render static sprite for the unlit candle
+    }
 
     Level_Segment active[5];
     u32 count = GetActiveLevelSegments(world, active); // @Duplicate: We did this before
@@ -599,6 +621,17 @@ internal void DrawLevelSegment(Game_State *state, Level_Segment *segment, v2 seg
     sfRenderWindow_drawRectangleShape(state->renderer, level, 0);
 }
 
+internal void DrawStaticEntity(Game_State *state, Entity *entity, Asset *texture) {
+    sfSprite *sprite = sfSprite_create();
+
+    //sfSprite_setOrigin(sprite, entity->half_dim);
+    sfSprite_setPosition(sprite, entity->position - (entity->half_dim));
+    sfSprite_setScale(sprite, entity->scale);
+    sfSprite_setTexture(sprite, texture->texture, true);
+
+    sfRenderWindow_drawSprite(state->renderer, sprite, 0);
+}
+
 internal void DrawStaticEntity(Game_State *state, Entity *entity) {
     // All static entities preceed Player in the type enum
     Assert(entity->type < EntityType_Player);
@@ -608,14 +641,7 @@ internal void DrawStaticEntity(Game_State *state, Entity *entity) {
     Asset *texture = GetAsset(&state->assets, name);
     Assert(texture->type == Asset_Texture);
 
-    sfSprite *sprite = sfSprite_create();
-
-    //sfSprite_setOrigin(sprite, entity->half_dim);
-    sfSprite_setPosition(sprite, entity->position - ( entity->half_dim));
-    sfSprite_setScale(sprite, entity->scale);
-    sfSprite_setTexture(sprite, texture->texture, true);
-
-    sfRenderWindow_drawSprite(state->renderer, sprite, 0);
+    DrawStaticEntity(state, entity, texture);
 }
 
 internal void UpdateChaseBubbles(Game_State *state, Play_State *playState, Game_Input *input, v2 spawnlines[8]) {
@@ -667,14 +693,16 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     World *world = &playState->world;
 
     if(!playState->initialised) {
-        LoadLevelFromFile(state, world, "Level.aml");
+        if (!playState->from_editor) {
+            LoadLevelFromFile(state, world, "Level.aml");
+        }
 
         Entity *player = &world->entities[0]; // @Note: Slot 0 is reserved for the player
         player->velocity = V2(0, 0);
         Assert(player->type == EntityType_Player);
 
         player->animation = CreatePlayerAnimation(&state->assets);
-        player->health    = 2;
+        player->health    = 3;
 
         player->half_dim = V2(35, 50); // @Hack: Should be set by file
 
@@ -685,10 +713,15 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
             switch (entity->type) {
                 case EntityType_Torch: {
                     entity->animation = CreateTorchAnimation(&state->assets);
+                    AddFlags(&entity->flags, EntityState_Unchecked);
                 }
                 break;
-                case EntityType_Wind: {
-                    entity->animation = CreateWindAnimation(&state->assets);
+                case EntityType_Spirit: {
+                    entity->animation = CreateSpiritAnimation(&state->assets);
+                }
+                break;
+                case EntityType_Tentacle: {
+                    entity->animation = CreateTentacleAnimation(&state->assets);
                 }
                 break;
             }
@@ -702,6 +735,7 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
         playState->candle[0] = CreateAnimationFromTexture(candle_low->texture,    V2(0.16, 0.16), 1, 3, 0.08f);
         playState->candle[1] = CreateAnimationFromTexture(candle_medium->texture, V2(0.16, 0.16), 1, 3, 0.08f);
         playState->candle[2] = CreateAnimationFromTexture(candle_high->texture,   V2(0.16, 0.16), 1, 3, 0.08f);
+        playState->player_spawn = player->position;
         MusicLayers *music = &playState->music[0];
         music->drums = Music_Request;
         music->hat = Music_Request;
@@ -714,7 +748,13 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
         playState->initialised = true;
     }
 
+    if (JustPressed(input->f[11])) {
+        RemoveLevelState(state);
+        return;
+    }
+
     f32 dt = input->delta_time;
+    Game_Controller *controller = &input->controllers[0];
 
     MusicHandlerUpdate(state, &playState->music[0], dt);
 
@@ -726,7 +766,12 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     Level_Segment active[5]; // @Note: The segment the player is currently in and the 4 adjacent segments
     u32 count = GetActiveLevelSegments(world, active);
 
-    sfShader_bind(state->lighting_shader);
+    if (player->health != 0) {
+        sfShader_bind(state->diffuse_shader);
+    }
+    else {
+        sfShader_bind(state->ambient_shader);
+    }
 
     // Prepass to draw all of the segments to make sure they don't overlap entity parts
     for (u32 it = 0; it < count; ++it) {
@@ -751,39 +796,84 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                     DrawStaticEntity(state, entity);
                 }
                 break;
+                case EntityType_Statue: {
+                    // @Todo: Start chase when player gets within range
+                    DrawStaticEntity(state, entity);
+                }
+                break;
                 case EntityType_Fireball: {
+                    // @Note: Probably won't happen here
                     // @Todo: Update direction, size etc.
                 }
                 break;
                 case EntityType_Torch: {
-                    // @Todo: Check if the player is within range and activate
-                    UpdateRenderAnimation(state, &entity->animation, entity->position, dt);
+                    if (HasFlags(entity->flags, EntityState_Unchecked)) {
+                        Asset *asset = GetAsset(&state->assets, "TorchOff");
+                        DrawStaticEntity(state, entity, asset);
+
+                        Bounding_Box torch_box  = CreateBox(entity->position, entity->half_dim);
+                        Bounding_Box player_box = CreateBox(player->position, player->half_dim);
+
+                        if (JustPressed(controller->interact)) {
+                            if (Overlaps(&torch_box, &player_box)) {
+                                RemoveFlags(&entity->flags, EntityState_Unchecked);
+                            }
+                        }
+                    }
+                    else {
+                        UpdateRenderAnimation(state, &entity->animation, entity->position, dt);
+                    }
                 }
                 break;
                 case EntityType_Raghead: {
-                    v2 dir = entity->path_points[entity->next_point] - entity->position;
-                    f32 len = Length(dir);
-                    if (len < 0.5) {
-                        if (HasFlags(entity->flags, EntityState_ReversedPathing)) {
-                            entity->next_point -= 1;
+                    // @Todo: Vary position based on pathing
+                    //
+                    //
 
-                            if (entity->next_point == 0) {
-                                RemoveFlags(&entity->flags, EntityState_ReversedPathing);
-                            }
-                        }
-                        else {
-                            entity->next_point += 1;
-                            if (entity->next_point >= entity->path_count) {
-                                entity->next_point -= 1;
-                                AddFlags(&entity->flags, EntityState_ReversedPathing);
-                            }
-                        }
+                    local f32 attack_cooldown = 2; // @Temp: Will go in Entity struct but sizes
+                    attack_cooldown -= dt;
 
+                    v2 player_dir = player->position - entity->position;
+                    f32 player_dist = Length(player_dir);
+                    if ((player_dist < 200) && attack_cooldown < 0) {
+                        Entity *attack = GetNextScratchEntity(world);
+                        attack->type = EntityType_Wind;
+                        attack->scale = V2(1, 1);
+                        attack->half_dim = V2(10, 10);
+                        AddFlags(&attack->flags, EntityState_Active);
+
+                        player_dir *= (1.0f / player_dist);
+
+                        attack->position = entity->position;
+                        attack->velocity = 80 * player_dir;
+
+                        attack_cooldown = 2;
                     }
                     else {
-                        dir *= (1.0f / len);
-                        entity->velocity = 80 * dir;
-                        entity->position += (dt * entity->velocity);
+                        v2 dir = entity->path_points[entity->next_point] - entity->position;
+                        f32 len = Length(dir);
+                        if (len < 0.5) {
+                            if (HasFlags(entity->flags, EntityState_ReversedPathing)) {
+                                entity->next_point -= 1;
+
+                                if (entity->next_point == 0) {
+                                    RemoveFlags(&entity->flags, EntityState_ReversedPathing);
+                                }
+                            }
+                            else {
+                                entity->next_point += 1;
+                                if (entity->next_point >= entity->path_count) {
+                                    entity->next_point -= 1;
+                                    AddFlags(&entity->flags, EntityState_ReversedPathing);
+                                }
+                            }
+
+                        }
+                        else {
+                            dir *= (1.0f / len);
+                            entity->velocity = 80 * dir;
+                            entity->position += (dt * entity->velocity);
+                        }
                     }
 
                     DrawStaticEntity(state, entity);
@@ -800,7 +890,7 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                     }
                 }
                 break;
-                case EntityType_Wind: {
+                case EntityType_Spirit: {
                     // @Todo: Pathing
                     // @Todo: Make inactive if reached end of path
 
@@ -821,11 +911,6 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                 break;
                 case EntityType_DarkWall: {
                     if(HasFlags(entity->flags, EntityState_Active)) {
-                        /* @TODO Matt: When the screen is activated run this
-                        v2 dir = playState->player_spawn - player->position;
-                        f32 len = length(dir);
-                        entity->location = view_size.x/2 * dir * (1/sqrt(len));
-                        */
 
                         entity->half_dim += V2(200, 200) * dt;
                         Bounding_Box player_box = CreateBox(player->position, player->half_dim);
@@ -882,12 +967,46 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                         UpdateChaseBubbles(state, playState, input, line);
                     }
                 }
+                case EntityType_Tentacle: {
+                    UpdateRenderAnimation(state, &entity->animation, entity->position, dt);
+                }
+                break;
             }
+        }
+    }
+
+    for (u32 it = 0; it < ArrayCount(world->scratch_entities); ++it) {
+        Entity *entity = &world->scratch_entities[it];
+        if (!HasFlags(entity->flags, EntityState_Active)) { continue; }
+
+        switch (entity->type) {
+            case EntityType_Wind: {
+                // @Hack: Don't have texture for wind yet
+                entity->type = EntityType_Fireball;
+                DrawStaticEntity(state, entity);
+                entity->type = EntityType_Wind;
+
+                entity->position += (dt * entity->velocity);
+            }
+            break;
+            case EntityType_Fireball: {
+            }
+            break;
         }
     }
 
     UpdateRenderPlayer(state, playState, input, player);
     sfShader_bind(0);
+
+    if(JustPressed(controller->interact)) {
+        Entity *e = GetNextScratchEntity(world);
+        e->type = EntityType_DarkWall;
+        AddFlags(&e->flags, EntityState_Active);
+        v2 dir = playState->player_spawn - player->position;
+        f32 len = length(dir);
+        e->position = view_size.x/2 * dir * (1/sqrt(len));
+        printf("Spawned\n");
+    }
 
     // @Todo: Reenable UpdateRenderFireBalls(state, playState, input);
     //
@@ -1042,22 +1161,26 @@ internal void UpdateRenderLogoState(Game_State *state, Logo_State *logo, Game_In
 
 internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
     if (!state->initialised) {
-        //CreateLevelState(state, LevelType_Edit);
-        CreateLevelState(state, LevelType_Play);
+        CreateLevelState(state, LevelType_Edit);
+        //CreateLevelState(state, LevelType_Play);
         // TODO RELEASE: Enable logo
         CreateLevelState(state, LevelType_Menu);
         //CreateLevelState(state, LevelType_Logo);
 
         InitAssets(&state->assets, 64);
 
-        LoadAsset(&state->assets, "Entity00", Asset_Texture);
-        LoadAsset(&state->assets, "Entity01", Asset_Texture);
-        LoadAsset(&state->assets, "Entity02", Asset_Texture);
-        LoadAsset(&state->assets, "Entity03", Asset_Texture);
-        LoadAsset(&state->assets, "Entity04", Asset_Texture, AssetFlag_Animation);
-        LoadAsset(&state->assets, "Entity05", Asset_Texture, AssetFlag_Animation);
-        LoadAsset(&state->assets, "Entity06", Asset_Texture, AssetFlag_Animation);
+        for (u32 it = 0; it < EntityType_Count; ++it) {
+            char buf[256];
+            umm len = snprintf(buf, sizeof(buf), "Entity%02d", it);
 
+            char *name = cast(char *) Alloc(len + 1);
+            CopySize(name, buf, len + 1);
+
+            u32 flags = 0;
+            if (it >= EntityType_Player) { flags = AssetFlag_Animation; }
+
+            LoadAsset(&state->assets, name, Asset_Texture, flags);
+        }
 
         LoadAsset(&state->assets, "Location00", Asset_Texture);
         LoadAsset(&state->assets, "Location01", Asset_Texture);
@@ -1065,6 +1188,8 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
         LoadAsset(&state->assets, "Location03", Asset_Texture);
 
         LoadAsset(&state->assets, "DarkClouds", Asset_Texture);
+
+        LoadAsset(&state->assets, "TorchOff", Asset_Texture);
 
         LoadAsset(&state->assets, "CandleLow", Asset_Texture);
         LoadAsset(&state->assets, "CandleMid", Asset_Texture);
@@ -1099,7 +1224,7 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
             }
         )VERT";
 
-        const char *frag_code = R"FRAG(
+        const char *diffuse_frag_code = R"FRAG(
             in vec2 frag_position;
 
             #define MAX_LIGHTS 16
@@ -1117,7 +1242,7 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
             uniform float time;
 
             void main() {
-                vec3 ambient = vec3(0, 0, 0);
+                vec3 diffuse = vec3(0, 0, 0);
                 for (int it = 0; it < MAX_LIGHTS; ++it) {
                     vec2 dir = light_positions[it] - frag_position;
 
@@ -1126,15 +1251,29 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
 
                     float attenuation = 1.0 / (1.0 + (0.09 * dist) + (0.032 * (dist * dist)));
 
-                    ambient += attenuation * light_colours[it];
+                    diffuse += attenuation * light_colours[it];
                 }
 
-                final_colour = vec4(ambient, 1) * texture2D(image, gl_TexCoord[0].xy);
+                final_colour = vec4(diffuse, 1) * texture2D(image, gl_TexCoord[0].xy);
             }
         )FRAG";
 
-        state->lighting_shader = sfShader_createFromMemory(vertex_code, 0, frag_code);
-        Assert(state->lighting_shader);
+        const char *ambient_frag_code = R"FRAG(
+            in vec2 frag_position;
+
+            varying out vec4 final_colour;
+
+            uniform sampler2D image;
+
+            void main() {
+                vec4 ambient = vec4(0.05, 0.05, 0.05, 1);
+                final_colour = ambient * texture2D(image, gl_TexCoord[0].xy);
+            }
+        )FRAG";
+
+        state->diffuse_shader = sfShader_createFromMemory(vertex_code, 0, diffuse_frag_code);
+        state->ambient_shader = sfShader_createFromMemory(vertex_code, 0, ambient_frag_code);
+        Assert(state->diffuse_shader && state->ambient_shader);
 
         state->initialised = true;
     }

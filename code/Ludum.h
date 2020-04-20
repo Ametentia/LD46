@@ -53,6 +53,9 @@ struct Level_Header {
 
     u32 total_box_count;
     u32 total_entity_count;
+
+    umm entity_size;
+
     // @Todo: Maybe lights are sepearte
 };
 
@@ -132,23 +135,33 @@ struct Animation {
 };
 
 enum Entity_Type {
-    // @Note: Non-animated entities
-    EntityType_Rocks = 0,
-    EntityType_Fireball,
-    EntityType_Raghead,
-    EntityType_Painting,
+    // @Note: Non-animated prop entities
+    EntityType_Rocks     = 0,
+    EntityType_Painting  = 1,
+    EntityType_Fireplace = 2,
+    EntityType_Carpet    = 3,
+    EntityType_Window    = 4,
+    EntityType_Banner    = 5,
+    EntityType_Barrel    = 6,
 
-    EntityType_DarkWall,
+    // @Note: Non-animated with effects
+    EntityType_Fireball  = 7,
+    EntityType_Raghead   = 8,
+    EntityType_Statue    = 9,
+    EntityType_Wind      = 10,
+
     // @Note: Animated Entities
-    EntityType_Player,
-    EntityType_Torch,
-    EntityType_Wind,
+    EntityType_Player    = 11,
+    EntityType_Torch     = 12,
+    EntityType_Spirit    = 13,
+    EntityType_Tentacle  = 14,
 
     EntityType_Count,
 
     // @Note: These don't have a texture so I am just putting them out of the way for now
     EntityType_ParticleEmitter = 10000,
-    EntityType_Light = 10001
+    EntityType_Light = 10001,
+    EntityType_DarkWall = 10002,
 };
 
 enum Entity_State_Flags {
@@ -158,7 +171,9 @@ enum Entity_State_Flags {
     EntityState_HoldingFireball = 0x8,
     EntityState_Active = 0x10,
     EntityState_Attached = 0x20,
-    EntityState_ReversedPathing = 0x40
+    EntityState_ReversedPathing = 0x40,
+    EntityState_Unchecked = 0x80,
+    EntityState_Lit = 0x100
 };
 
 struct Entity {
@@ -190,6 +205,10 @@ struct Entity {
     u32 path_count;
     v2  path_points[6];
     u32 next_point;
+
+    f32 attack_timer;
+
+    v2 light_offset;
 };
 
 struct World {
@@ -202,6 +221,11 @@ struct World {
 
     u32 entity_count;
     Entity *entities;
+
+    // @Note: These are used for entities that are spawned rather than loaded
+    // Just a circular buffer
+    u32 next_scratch_entity;
+    Entity scratch_entities[64];
 };
 
 
@@ -253,6 +277,8 @@ struct Credits_State {
 
 struct Play_State {
     b32 initialised;
+    b32 from_editor;
+
     World world;
 
     Animation entity_animations[EntityType_Count - EntityType_Player];
@@ -349,7 +375,9 @@ struct Game_State {
     b32 initialised;
 
     sfRenderWindow *renderer;
-    sfShader *lighting_shader;
+
+    sfShader *diffuse_shader;
+    sfShader *ambient_shader;
 
     Asset_Manager assets;
 
