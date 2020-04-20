@@ -268,6 +268,8 @@ struct Credits_State {
     Bounding_Box buttons[1];
 };
 
+#define MAX_LIGHTS 16
+
 struct Play_State {
     b32 initialised;
     b32 from_editor;
@@ -277,6 +279,12 @@ struct Play_State {
     Animation entity_animations[EntityType_Count - EntityType_Player];
     Animation candle[3];
     MusicLayers music[1];
+
+    u32 light_count;
+    v2 light_positions[MAX_LIGHTS];
+    f32 light_scales[MAX_LIGHTS];
+    v3 light_colours[MAX_LIGHTS];
+
 
     f32 total_time;
     f32 distance_scale;

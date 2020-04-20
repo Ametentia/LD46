@@ -29,297 +29,42 @@ internal Level_State *RemoveLevelState(Game_State *state) {
 
 #include "Ludum_Editor.cpp"
 
-#if 0
-internal void AddFireBall(Play_State *playState) {
-=======
-internal void LoadLevelFromFile(Game_State *state, World *world, const char *filename) {
-    FILE *handle = fopen(filename, "rb");
+// Light stuff
+//
+//
 
-    Level_Header header;
-    fread(&header, sizeof(Level_Header), 1, handle);
+internal void AddLight(Play_State *state, v2 pos, f32 scale, v3 colour) {
+    u32 index = state->light_count;
 
-    if (header.signature[0] != 'A' ||
-        header.signature[1] != 'M' ||
-        header.signature[2] != 'T' ||
-        header.signature[3] != 'L')
-    {
-        printf("Failed signature check\n");
+    if (index >= MAX_LIGHTS) {
+        printf("WARNING: Too many lights have been submitted\n");
         return;
     }
 
-    printf("Segment dim is { %d, %d }\n", header.segment_dim[0], header.segment_dim[1]);
-    printf("Entities: %d, Boxes: %d\n", header.total_entity_count, header.total_box_count);
+    state->light_count += 1;
 
-    fread(world->segments, sizeof(world->segments), 1, handle);
-
-    world->entity_count = header.total_entity_count;
-    world->entities = cast(Entity *) Alloc(world->entity_count * sizeof(Entity));
-
-    fread(world->entities, world->entity_count * sizeof(Entity), 1, handle);
-
-    world->box_count = header.total_box_count;
-    world->boxes = cast(Bounding_Box *) Alloc(world->box_count * sizeof(Bounding_Box));
-
-    fread(world->boxes, world->box_count * sizeof(Bounding_Box), 1, handle);
-
-    fclose(handle);
+    state->light_positions[index] = pos;
+    state->light_scales[index]    = scale;
+    state->light_colours[index]   = colour;
 }
 
-internal void WriteLevelToFile(Game_State *state, Edit_State *edit) {
-    FILE *handle = fopen("Level.aml", "wb");
+internal void UploadLightInformation(Game_State *state, Play_State *play_state) {
+    Asset *noise = GetAsset(&state->assets, "PNoise");
+    sfShader_setTextureUniform(state->diffuse_shader, "noise", noise->texture);
 
-    // Write out the header
-    u32 total_box_count = 0;
-    u32 total_entity_count = 0;
-    for (u32 x = 0; x < 16; ++x) {
-        for (u32 y = 0; y < 8; ++y) {
-            Edit_Segment *edit_seg = &edit->segments[x][y];
-            total_box_count += edit_seg->box_count;
-            total_entity_count += edit_seg->entity_count;
-        }
-    }
+    u32 count = play_state->light_count;
 
-    if (total_box_count == 0 && total_entity_count == 0) {
-        printf("Empty level\n");
-        fclose(handle);
-        return;
-    }
+    sfShader_setFloatUniform(state->diffuse_shader, "time", play_state->total_time);
+    sfShader_setFloatUniformArray(state->diffuse_shader, "light_distance_scales", play_state->light_scales, count);
+    sfShader_setVec2UniformArray(state->diffuse_shader, "light_positions", play_state->light_positions, count);
+    sfShader_setVec3UniformArray(state->diffuse_shader, "light_colours", play_state->light_colours, count);
 
-    u8 sig[] = { 'A', 'M', 'T', 'L' };
-    fwrite(sig, 4, 1, handle);
-
-    u32 segment_dim[2] = { 2880, 1440 };
-    fwrite(segment_dim, sizeof(segment_dim), 1, handle);
-
-
-    fwrite(&total_box_count, sizeof(u32), 1, handle);
-    fwrite(&total_entity_count, sizeof(u32), 1, handle);
-
-    u32 running_total_entities = 0;
-    u32 running_total_boxes = 0;
-
-    for (u32 x = 0; x < 16; ++x) {
-        for (u32 y = 0; y < 8; ++y) {
-            Level_Segment segment = {};
-            Edit_Segment *edit_seg = &edit->segments[x][y];
-
-            if (!edit_seg->in_use) {
-                segment.in_use = false;
-            }
-            else {
-                segment.in_use = true;
-                segment.texture_number = edit_seg->texture_index;
-
-                segment.entity_count = edit_seg->entity_count;
-                segment.box_count    = edit_seg->box_count;
-
-                segment.entity_range_start = running_total_entities;
-                segment.box_range_start    = running_total_boxes;
-
-                running_total_entities += segment.entity_count;
-                running_total_boxes += segment.box_count;
-
-                segment.entity_range_one_past_last = running_total_entities;
-                segment.box_range_one_past_last    = running_total_boxes;
-            }
-
-            fwrite(&segment, sizeof(Level_Segment), 1, handle);
-        }
-    }
-
-    for (u32 x = 0; x < 16; ++x) {
-        for (u32 y = 0; y < 8; ++y) {
-            Edit_Segment *edit_seg = &edit->segments[x][y];
-
-            if (edit_seg->in_use) {
-                fwrite(edit_seg->entities, edit_seg->entity_count * sizeof(Entity), 1, handle);
-            }
-
-        }
-    }
-
-    for (u32 x = 0; x < 16; ++x) {
-        for (u32 y = 0; y < 8; ++y) {
-            Edit_Segment *edit_seg = &edit->segments[x][y];
-
-            if (edit_seg->in_use) {
-                fwrite(edit_seg->boxes, edit_seg->box_count * sizeof(Bounding_Box), 1, handle);
-            }
-        }
-    }
-
-    fclose(handle);
+    play_state->light_count = 0;
 }
 
-internal Animation CreateAnimationFromTexture(sfTexture *texture, v2 scale, u32 rows, u32 columns, f32 time_per_frame = 0.1f) {
-    Animation result;
-    result.texture = texture;
-
-    result.scale = scale;
-
-    v2 tex_size = V2(sfTexture_getSize(texture));
-    result.frame_size.x = tex_size.x / cast(f32) columns;
-    result.frame_size.y = tex_size.y / cast(f32) rows;
-
-    result.rows = rows;
-    result.columns = columns;
-
-    result.total_frames = (rows * columns);
-
-    result.time_per_frame = time_per_frame;
-    result.current_frame  = 0;
-    result.accumulator    = 0;
-    result.flip           = false;
-    result.pause          = false;
-
-    return result;
-}
-
-internal void AddFireBall(Play_State *playState, Game_Input *input) {
->>>>>>> remotes/origin/matt
-    for(u8 i = 0; i < 3; i++) {
-        Fire_Ball *fireball = &playState->fire_balls[i];
-        Player *player = &playState->player[0];
-        if(!fireball->active) {
-            fireball->active = true;
-            fireball->radius = 15;
-            fireball->position = player->position;
-            v2 dir = input->mouse_position - fireball->position;
-            f32 len = length(dir);
-            fireball->velocity = 100 * dir * (1/sqrt(len));
-            Player *player = &playState->player[0];
-            player->fireball_break = true;
-            return;
-        }
-    }
-}
-
-internal void UpdateRenderParticleSpawner(Game_State *state, ParticleSpawner *spawner, f32 delta_time) {
-    u32 i;
-    f32 particle_allowance = 0;
-    for(i = 0; i < spawner->max_particles; i++) {
-        Particle *p = &spawner->particles[i];
-        if(!p->active && particle_allowance < spawner->rate * delta_time) {
-            p->active = true;
-            v2 minSpawnRange = spawner->centre - spawner->half_size;
-            v2 maxSpawnRange = spawner->centre + spawner->half_size;
-            p->position = random(minSpawnRange, maxSpawnRange);
-            p->rotation = random(spawner->rotation_range.x, spawner->rotation_range.y);
-            p->velocity = random(spawner->velocity_min, spawner->velocity_max);
-            p->size = random(spawner->size_min, spawner->size_max);
-            p->life_time = random(spawner->life_time_range.x, spawner->life_time_range.y);
-            particle_allowance++;
-        }
-        p->life_time -= delta_time;
-        if(p->life_time < 0 || p->position.y > 2000) {
-            p->active = false;
-            continue;
-        }
-        p->position += p->velocity * delta_time;
-        if(spawner->strict_x) {
-            if(p->position.x > spawner->centre.x + spawner->half_size.x) {
-                p->position.x -= spawner->half_size.x*2;
-            }
-            else if(p->position.x < spawner->centre.x - spawner->half_size.x) {
-                p->position.x += spawner->half_size.x*2;
-            }
-        }
-        sfRectangleShape *rs = sfRectangleShape_create();
-        sfRectangleShape_setTexture(rs, GetAsset(&state->assets, spawner->assetName)->texture, true);
-        sfRectangleShape_setSize(rs, p->size);
-        sfRectangleShape_setPosition(rs, p->position);
-        sfRectangleShape_setRotation(rs, p->rotation);
-        sfColor col = {
-             255,
-             255,
-             255,
-             spawner->transparency
-        };
-        sfRectangleShape_setFillColor(rs, col);
-        sfRenderWindow_drawRectangleShape(state->renderer, rs, 0);
-        sfRectangleShape_destroy(rs);
-    }
-    return;
-}
-
-internal Particle *InitialiseParticlePool(ParticleSpawner *spawner) {
-    Particle *result = cast(Particle *) Alloc(sizeof(Particle) * spawner->max_particles);
-    memset(result, 0, sizeof(Particle) * spawner->max_particles);
-
-    spawner->particles = result;
-    return result;
-}
-
-internal void UpdateRenderFireBalls(Game_State *state, Play_State *playState, Game_Input *input) {
-    for(u8 i = 0; i < 3; i++) {
-        Fire_Ball *fireball = &playState->fire_balls[i];
-        if(!fireball->active) { continue; }
-
-        Player *player = &playState->player[0];
-        Game_Controller *controller = &input->controllers[0];
-
-        fireball->rotation-=360*input->delta_time;
-        if(length(fireball->velocity) < 30000) {
-            fireball->velocity += fireball->velocity * 300 * input->delta_time;
-        }
-        if(fireball->radius < 3) {
-            fireball->active = false;
-        }
-
-        fireball->radius -= 2*input->delta_time;
-        fireball->position += input->delta_time * fireball->velocity;
-        sfColor c = sfRed;
-        sfCircleShape *r = sfCircleShape_create();
-        sfCircleShape_setOrigin(r, V2(fireball->radius, fireball->radius));
-        sfCircleShape_setRadius(r, fireball->radius);
-        sfCircleShape_setRotation(r, fireball->rotation);
-        sfCircleShape_setTexture(r, GetAsset(&state->assets, "Fireball")->texture, false);
-        sfCircleShape_setPosition(r, fireball->position);
-        sfRenderWindow_drawCircleShape(state->renderer, r, 0);
-        sfCircleShape_destroy(r);
-    }
-}
-
-        ParticleSpawner *rainSpawner = &playState->rain[0];
-        rainSpawner->centre = V2(340, 300);
-        rainSpawner->half_size = V2(1440, 20);
-        rainSpawner->velocity_min = V2(-200, 350);
-        rainSpawner->velocity_max = V2(-180, 450);
-        rainSpawner->size_min = V2(4, 6);
-        rainSpawner->size_max = V2(4, 6);
-        rainSpawner->rotation_range = V2(33, 30);
-        rainSpawner->life_time_range = V2(40, 120);
-        rainSpawner->max_particles = 800;
-        rainSpawner->rate = 20;
-        rainSpawner->assetName = "Rain";
-        rainSpawner->strict_x = true;
-        rainSpawner->transparency = 150;
-        InitialiseParticlePool(rainSpawner);
-
-        ParticleSpawner *windSpawner = &playState->wind[0];
-        windSpawner->centre = V2(340, 300);
-        windSpawner->half_size = V2(10, 10);
-        windSpawner->velocity_min = V2(-10, -10);
-        windSpawner->velocity_max = V2(10, 10);
-        windSpawner->size_min = V2(3, 6);
-        windSpawner->size_max = V2(4, 7);
-        windSpawner->rotation_range = V2(0, 360);
-        windSpawner->life_time_range = V2(0.8, 1);
-        windSpawner->max_particles = 300;
-        windSpawner->rate = 20;
-        windSpawner->assetName = "Fireball";
-        windSpawner->transparency = 255;
-        InitialiseParticlePool(windSpawner);
-
-    ParticleSpawner *rain = &playState->rain[0];
-    rain->centre.x = player->position.x;
-    UpdateRenderParticleSpawner(state, playState->rain, dt);
-    ParticleSpawner *wind = &playState->wind[0];
-    wind->centre = input->mouse_position;
-    UpdateRenderParticleSpawner(state, playState->wind, dt);
-
-
-#endif
+//
+//
+//
 
 internal void MusicHandlerUpdate(Game_State *state, MusicLayers *layers, f32 time_per_frame) {
     if(!layers->initialised) {
@@ -489,17 +234,12 @@ internal void UpdateRenderPlayer(Game_State *state, Play_State *play_state, Game
 
         UpdateRenderAnimation(state, candle_animation, player->position + offset, dt);
 
-        Asset *noise = GetAsset(&state->assets, "PNoise");
-        sfShader_setTextureUniform(state->diffuse_shader, "noise", noise->texture);
-
-        f32 light_distance_scale = ((3 - (player->health - 1)) * 0.06);
         v3 colour = { 0.5, 0.5, 1.0 };
         v2 light_position = player->position + offset;
+        AddLight(play_state, light_position, (3 - (player->health - 1)) * 0.06, colour);
 
-        sfShader_setFloatUniform(state->diffuse_shader, "time", input->delta_time);
-        sfShader_setFloatUniformArray(state->diffuse_shader, "light_distance_scales", &light_distance_scale, 1);
-        sfShader_setVec2UniformArray(state->diffuse_shader, "light_positions", &light_position, 1);
-        sfShader_setVec3UniformArray(state->diffuse_shader, "light_colours", &colour, 1);
+
+        UploadLightInformation(state, play_state);
     }
     else {
         // @Todo: Render static sprite for the unlit candle
@@ -706,8 +446,12 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
             Entity *entity = &world->entities[range];
             if (!HasFlags(entity->flags, EntityState_Active)) { continue; } // Don't update or render inactive
 
+            if (HasFlags(entity->flags, EntityState_Lit)) {
+                AddLight(playState, entity->position, 0.03, V3(1, 1, 1));
+            }
+
             switch (entity->type) {
-                // case EntityType_Barrel: etc.
+                case EntityType_Barrel:
                 case EntityType_Painting:
                 case EntityType_Rocks: {
                     DrawStaticEntity(state, entity);
@@ -734,6 +478,7 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                         if (JustPressed(controller->interact)) {
                             if (Overlaps(&torch_box, &player_box)) {
                                 RemoveFlags(&entity->flags, EntityState_Unchecked);
+                                AddFlags(&entity->flags, EntityState_Lit);
                             }
                         }
                     }
@@ -743,11 +488,7 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                 }
                 break;
                 case EntityType_Raghead: {
-                    // @Todo: Vary position based on pathing
-                    //
-                    //
-
-                    local f32 attack_cooldown = 2; // @Temp: Will go in Entity struct but sizes
+                    local f32 attack_cooldown = 2;
                     attack_cooldown -= dt;
 
                     v2 player_dir = player->position - entity->position;
