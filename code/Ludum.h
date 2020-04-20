@@ -168,11 +168,10 @@ enum Entity_Type {
 
     EntityType_Count,
 
-    EntityType_DarkWall  = 20,
-
     // @Note: These don't have a texture so I am just putting them out of the way for now
     EntityType_ParticleEmitter = 10000,
-    EntityType_Light = 10001
+    EntityType_Light = 10001,
+    EntityType_DarkWall = 10002,
 };
 
 enum Entity_State_Flags {

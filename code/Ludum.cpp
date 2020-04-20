@@ -1,31 +1,6 @@
 #include "Ludum_Assets.cpp"
 #include "Ludum_Animation.cpp"
 
-internal sfSound *GetSound(Play_State *state, sfSoundBuffer *wanted_buffer) {
-    for(u32 i = 0; i < 16; i++) {
-        sfSound *sound = state->sounds[i];
-        if(!sound) {
-            state->sounds[i] = sfSound_create();
-            sound = state->sounds[i];
-        }
-        const sfSoundBuffer *buffer = sfSound_getBuffer(sound);
-        if(wanted_buffer == buffer) {
-            return sound;
-        }
-    }
-    for(u32 i = 0; i < 16; i++) {
-        sfSound *sound = state->sounds[i];
-        if(!sound) {
-            sound = sfSound_create();
-        }
-        if(sfSound_getStatus(sound) != sfPlaying) {
-            sfSound_setBuffer(sound, wanted_buffer);
-            return sound;
-        }
-    }
-    return 0;
-}
-
 //
 // @LevelState: State code
 //
@@ -53,6 +28,31 @@ internal Level_State *RemoveLevelState(Game_State *state) {
 //
 
 #include "Ludum_Editor.cpp"
+
+internal sfSound *GetSound(Play_State *state, sfSoundBuffer *wanted_buffer) {
+    for(u32 i = 0; i < 16; i++) {
+        sfSound *sound = state->sounds[i];
+        if(!sound) {
+            state->sounds[i] = sfSound_create();
+            sound = state->sounds[i];
+        }
+        const sfSoundBuffer *buffer = sfSound_getBuffer(sound);
+        if(wanted_buffer == buffer) {
+            return sound;
+        }
+    }
+    for(u32 i = 0; i < 16; i++) {
+        sfSound *sound = state->sounds[i];
+        if(!sound) {
+            sound = sfSound_create();
+        }
+        if(sfSound_getStatus(sound) != sfPlaying) {
+            sfSound_setBuffer(sound, wanted_buffer);
+            return sound;
+        }
+    }
+    return 0;
+}
 
 // Light stuff
 //
@@ -413,20 +413,20 @@ internal void DrawStaticEntity(Game_State *state, Entity *entity) {
 
 internal void UpdateChaseBubbles(Game_State *state, Play_State *playState, Game_Input *input, v2 spawnlines[8]) {
     f32 dt = input->delta_time;
-    for(u32 i = 0; i < 2000; i++) {
+    for(u32 i = 0; i < 1000; i++) {
         Chase_Bubble *bubble = playState->chase_bubbles[i];
         if(!bubble->active) {
             bubble->active = true;
-            u32 offset = (u32)floor(i/500)*2;
+            u32 offset = (u32)floor(i/250)*2;
             v2 dir = spawnlines[0 + offset] - spawnlines[1 + offset];
             f32 len = Length(dir);
-            v2 spawnpoint = spawnlines[0] - (dir * cast (f32) (1.0/sqrt(len)) * random(0, len));
+            v2 spawnpoint = spawnlines[0 + offset] - (dir * cast (f32) (1.0/len) * random(0, len));
             bubble->position = spawnpoint;
-            bubble->radius = random(60, 90);
+            bubble->radius = random(50, 60);
         }
         bubble->position += V2(random(-3, 3)*dt, random(-3, 3)*dt);
-        bubble->radius -= random(50, 60)*dt;
-        if(bubble->radius < 10) {
+        bubble->radius -= random(40, 50)*dt;
+        if(bubble->radius < 15) {
             bubble->active = false;
             continue;
         }
@@ -444,7 +444,7 @@ internal void UpdateChaseBubbles(Game_State *state, Play_State *playState, Game_
         sfRenderWindow_drawCircleShape(state->renderer, r, 0);
         sfCircleShape_destroy(r);
     }
-    for(u32 i = 0; i < 2000; i++) {
+    for(u32 i = 0; i < 1000; i++) {
         Chase_Bubble *bubble = playState->chase_bubbles[i];
         sfCircleShape *r = sfCircleShape_create();
         sfCircleShape_setOrigin(r, V2(bubble->radius, bubble->radius));
@@ -507,6 +507,7 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
         playState->candle[0] = CreateAnimationFromTexture(candle_low->texture,    V2(0.16, 0.16), 1, 3, 0.08f);
         playState->candle[1] = CreateAnimationFromTexture(candle_medium->texture, V2(0.16, 0.16), 1, 3, 0.08f);
         playState->candle[2] = CreateAnimationFromTexture(candle_high->texture,   V2(0.16, 0.16), 1, 3, 0.08f);
+        playState->player_spawn = player->position;
         MusicLayers *music = &playState->music[0];
         music->drums = Music_Request;
         music->hat = Music_Request;
@@ -628,6 +629,7 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                 break;
                 case EntityType_Raghead: {
                     local f32 attack_cooldown = 2;
+
                     attack_cooldown -= dt;
 
                     v2 player_dir = player->position - entity->position;
@@ -740,6 +742,70 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                 entity->position += (dt * entity->velocity);
             }
             break;
+            case EntityType_DarkWall: {
+                if(HasFlags(entity->flags, EntityState_Active)) {
+
+                    entity->half_dim += V2(75, 75) * dt;
+                    Bounding_Box player_box = CreateBox(player->position, player->half_dim);
+                    Bounding_Box wall_box = CreateBox(entity->position, entity->half_dim);
+                    if(Overlaps(&wall_box, &player_box)) {
+                        // TODO : Player dead!
+                        Assert(false);
+                    }
+                    v2 pos = entity->position;
+                    v2 size = entity->half_dim;
+                    v2 line[8] = {
+                        V2(pos.x - size.x, pos.y - size.y),
+                        V2(pos.x - size.x, pos.y + size.y),
+
+                        V2(pos.x + size.x, pos.y - size.y),
+                        V2(pos.x + size.x, pos.y + size.y),
+
+                        V2(pos.x - size.x, pos.y + size.y),
+                        V2(pos.x + size.x, pos.y + size.y),
+
+                        V2(pos.x - size.x, pos.y - size.y),
+                        V2(pos.x + size.x, pos.y - size.y),
+                    };
+                    sfRectangleShape *dis_rect = sfRectangleShape_create();
+                    sfRectangleShape_setOrigin(dis_rect, entity->half_dim);
+                    sfRectangleShape_setPosition(dis_rect, entity->position);
+                    sfRectangleShape_setSize(dis_rect, entity->half_dim*2);
+                    sfColor rect_col = {0,0,0,255};
+                    sfRectangleShape_setFillColor(dis_rect, rect_col);
+                    sfRenderWindow_drawRectangleShape(state->renderer, dis_rect, NULL);
+                    sfRectangleShape_destroy(dis_rect);
+                    UpdateChaseBubbles(state, playState, input, line);
+                } else if(Length(entity->half_dim) > 1){
+                    entity->half_dim -= V2(500, 500) * dt;
+                    v2 pos = entity->position;
+                    v2 size = entity->half_dim;
+                    v2 line[8] = {
+                        V2(pos.x - size.x, pos.y - size.y),
+                        V2(pos.x - size.x, pos.y + size.y),
+
+                        V2(pos.x + size.x, pos.y - size.y),
+                        V2(pos.x + size.x, pos.y + size.y),
+
+                        V2(pos.x - size.x, pos.y + size.y),
+                        V2(pos.x + size.x, pos.y + size.y),
+
+                        V2(pos.x - size.x, pos.y - size.y),
+                        V2(pos.x + size.x, pos.y - size.y),
+                    };
+
+                    sfRectangleShape *dis_rect = sfRectangleShape_create();
+                    sfRectangleShape_setOrigin(dis_rect, entity->half_dim);
+                    sfRectangleShape_setPosition(dis_rect, entity->position);
+                    sfRectangleShape_setSize(dis_rect, entity->half_dim*2);
+                    sfColor rect_col = {0,0,0,255};
+                    sfRectangleShape_setFillColor(dis_rect, rect_col);
+                    sfRenderWindow_drawRectangleShape(state->renderer, dis_rect, NULL);
+                    sfRectangleShape_destroy(dis_rect);
+                    UpdateChaseBubbles(state, playState, input, line);
+                }
+            }
+            break;
             case EntityType_Fireball: {
                 entity->position += (dt * entity->velocity);
                 entity->scale -= dt * V2(0.18, 0.18);
@@ -784,70 +850,6 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                 }
             }
             break;
-            case EntityType_DarkWall: {
-                if(HasFlags(entity->flags, EntityState_Active)) {
-                    /* @TODO Matt: When the screen is activated run this
-                    v2 dir = playState->player_spawn - player->position;
-                    f32 len = length(dir);
-                    entity->location = view_size.x/2 * dir * (1/sqrt(len));
-                    */
-
-                    entity->half_dim += V2(200, 200) * dt;
-                    Bounding_Box player_box = CreateBox(player->position, player->half_dim);
-                    Bounding_Box wall_box = CreateBox(entity->position, entity->half_dim);
-                    if(Overlaps(&wall_box, &player_box)) {
-                        // TODO : Player dead!
-                        Assert(false);
-                    }
-                    v2 pos = entity->position;
-                    v2 size = entity->half_dim;
-                    v2 line[8] = {
-                        V2(pos.x+size.x, pos.y+size.y),
-                        V2(pos.x+size.x, pos.y-size.y),
-                        V2(pos.x-size.x, pos.y-size.y),
-                        V2(pos.x-size.x, pos.y+size.y),
-                        V2(pos.x-size.x, pos.y+size.y),
-                        V2(pos.x+size.x, pos.y+size.y),
-                        V2(pos.x+size.x, pos.y-size.y),
-                        V2(pos.x-size.x, pos.y-size.y),
-                    };
-                    sfRectangleShape *dis_rect = sfRectangleShape_create();
-                    sfRectangleShape_setPosition(dis_rect, entity->position);
-                    sfRectangleShape_setTexture(dis_rect, GetAsset(&state->assets,"logo")->texture, false);
-                    sfRectangleShape_setSize(dis_rect, entity->half_dim*2);
-                    sfRectangleShape_setOrigin(dis_rect, entity->half_dim);
-                    sfColor rect_col = {0,0,0,255};
-                    sfRectangleShape_setFillColor(dis_rect, rect_col);
-                    sfRenderWindow_drawRectangleShape(state->renderer, dis_rect, NULL);
-                    sfRectangleShape_destroy(dis_rect);
-                    UpdateChaseBubbles(state, playState, input, line);
-                } else if(Length(entity->half_dim) > 1){
-                    entity->half_dim -= V2(500, 500) * dt;
-                    v2 pos = entity->position;
-                    v2 size = entity->half_dim;
-                    v2 line[8] = {
-                        V2(pos.x+size.x, pos.y+size.y),
-                        V2(pos.x+size.x, pos.y-size.y),
-                        V2(pos.x-size.x, pos.y-size.y),
-                        V2(pos.x-size.x, pos.y+size.y),
-                        V2(pos.x-size.x, pos.y+size.y),
-                        V2(pos.x+size.x, pos.y+size.y),
-                        V2(pos.x+size.x, pos.y-size.y),
-                        V2(pos.x-size.x, pos.y-size.y),
-                    };
-                    sfRectangleShape *dis_rect = sfRectangleShape_create();
-                    sfRectangleShape_setPosition(dis_rect, entity->position);
-                    sfRectangleShape_setTexture(dis_rect, GetAsset(&state->assets,"logo")->texture, false);
-                    sfRectangleShape_setSize(dis_rect, entity->half_dim*2);
-                    sfRectangleShape_setOrigin(dis_rect, entity->half_dim);
-                    sfColor rect_col = {0,0,0,255};
-                    sfRectangleShape_setFillColor(dis_rect, rect_col);
-                    sfRenderWindow_drawRectangleShape(state->renderer, dis_rect, NULL);
-                    sfRectangleShape_destroy(dis_rect);
-                    UpdateChaseBubbles(state, playState, input, line);
-                }
-            }
-            break;
         }
     }
 
@@ -856,6 +858,17 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     UploadLightInformation(state, playState);
 
     sfShader_bind(0);
+
+    if(JustPressed(controller->interact)) {
+        Entity *e = GetNextScratchEntity(world);
+        e->type = EntityType_DarkWall;
+        e->half_dim = V2(10,10);
+        AddFlags(&e->flags, EntityState_Active);
+        v2 dir = playState->player_spawn - player->position;
+        f32 len = Length(dir);
+        e->position = player->position - view_size.x * dir * (1/len);
+        printf("Spawned\n");
+    }
 
     // @Todo: Reenable UpdateRenderFireBalls(state, playState, input);
     //
@@ -876,6 +889,10 @@ internal void UpdateRenderCredits(Game_State *state, Credits_State *credits, Gam
     if(!credits->initialised) {
         credits->initialised = true;
     }
+    v2 mouse_pos = input->mouse_position;
+    Bounding_Box mouse = {};
+    mouse.centre = mouse_pos;
+    mouse.half_dim = V2(2, 2);
     sfFont *font = GetAsset(&state->assets, "ubuntu")->font;
     sfText *text = sfText_create();
     sfText_setFont(text, font);
@@ -883,11 +900,59 @@ internal void UpdateRenderCredits(Game_State *state, Credits_State *credits, Gam
 
     sfText_setString(text, "Back To Menu");
     sfFloatRect bounds = sfText_getLocalBounds(text);
+    Bounding_Box *b1 = &credits->buttons[0];
+    b1->centre = V2(view_size.x - bounds.width/2 - 20, view_size.y - 20);
+    b1->half_dim = V2(bounds.width/2, bounds.height/2);
+    sfText_setColor(text, sfWhite);
+    if(Overlaps(b1, &mouse)) {
+        sfText_setColor(text, sfRed);
+        if (WasPressed(input->mouse_buttons[0])) {
+            free(RemoveLevelState(state));
+        }
+    }
+
+    sfText_setOrigin(text, V2(0, 0));
+    sfText_setPosition(text, V2(view_size.x - bounds.width - 20, view_size.y - bounds.height - 20));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+
+
+    sfText_setString(text, "James Bulman: Programming");
+    bounds = sfText_getLocalBounds(text);
     sfText_setColor(text, sfWhite);
 
     sfText_setOrigin(text, V2(0, 0));
-    sfText_setPosition(text, V2(bounds.width-bounds.width - 10, bounds.height - 10));
+    sfText_setPosition(text, V2(20, view_size.y/2 - bounds.height - 20));
     sfRenderWindow_drawText(state->renderer, text, 0);
+
+    sfText_setString(text, "Cameron Thronton: Art");
+    sfText_setColor(text, sfWhite);
+
+    sfText_setOrigin(text, V2(0, 0));
+    sfText_setPosition(text, V2(20, view_size.y/2));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+
+    sfText_setString(text, "Alex Goldsack: Music");
+    sfText_setColor(text, sfWhite);
+
+    sfText_setOrigin(text, V2(0, 0));
+    sfText_setPosition(text, V2(20, view_size.y/2 + bounds.height + 20));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+
+    sfText_setString(text, "Matt Threlfall: Programming and Bugs");
+    sfText_setColor(text, sfWhite);
+
+    sfText_setOrigin(text, V2(0, 0));
+    sfText_setPosition(text, V2(20, view_size.y/2 + bounds.height*2 + 40));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+
+    sfText_setColor(text, sfWhite);
+    sfText_setString(text, "Credits");
+    sfText_setCharacterSize(text, 72);
+    bounds = sfText_getLocalBounds(text);
+    sfText_setOrigin(text, V2(bounds.width / 2, bounds.height / 2));
+    sfText_setPosition(text, V2(view_size.x/2, view_size.y/10));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+    sfText_destroy(text);
 }
 
 internal void UpdateRenderMenu(Game_State *state, Menu_State *menu, Game_Input *input) {
@@ -901,7 +966,6 @@ internal void UpdateRenderMenu(Game_State *state, Menu_State *menu, Game_Input *
     Bounding_Box mouse = {};
     mouse.centre = mouse_pos;
     mouse.half_dim = V2(2, 2);
-
 
     sfFont *font = GetAsset(&state->assets, "ubuntu")->font;
     sfText *text = sfText_create();
@@ -937,7 +1001,7 @@ internal void UpdateRenderMenu(Game_State *state, Menu_State *menu, Game_Input *
     if(Overlaps(b1, &mouse)) {
         sfText_setColor(text, sfRed);
         if (WasPressed(input->mouse_buttons[0])) {
-            CreateLevelState(state, LevelType_Logo);
+            CreateLevelState(state, LevelType_Credits);
         }
     }
 
@@ -965,7 +1029,7 @@ internal void UpdateRenderMenu(Game_State *state, Menu_State *menu, Game_Input *
     sfRenderWindow_drawText(state->renderer, text, 0);
 
     sfText_setColor(text, sfWhite);
-    sfText_setString(text, "Candle Light");
+    sfText_setString(text, "Candle Fright");
     sfText_setCharacterSize(text, 72);
     bounds = sfText_getLocalBounds(text);
     sfText_setOrigin(text, V2(bounds.width / 2, bounds.height / 2));
