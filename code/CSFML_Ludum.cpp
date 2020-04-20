@@ -70,9 +70,9 @@ internal void CSFMLHandleInputs(Game_Input *current_input, Game_Input *prev_inpu
         num += 1;
     }
 
-    CSFMLProcessGameButton(&current_input->debug_next, &prev_input->debug_next, sfKeyboard_isKeyPressed(sfKeyLBracket));
+    CSFMLProcessGameButton(&current_input->debug_next, &prev_input->debug_next, sfKeyboard_isKeyPressed(sfKeyRBracket));
 
-    CSFMLProcessGameButton(&current_input->debug_prev, &prev_input->debug_prev, sfKeyboard_isKeyPressed(sfKeyRBracket));
+    CSFMLProcessGameButton(&current_input->debug_prev, &prev_input->debug_prev, sfKeyboard_isKeyPressed(sfKeyLBracket));
 
     CSFMLProcessGameButton(&current_input->debug_up, &prev_input->debug_up, sfKeyboard_isKeyPressed(sfKeyUp));
     CSFMLProcessGameButton(&current_input->debug_down, &prev_input->debug_down, sfKeyboard_isKeyPressed(sfKeyDown));
@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
 
 
     sfVideoMode mode = { 1280, 720, 24 };
-    //sfVideoMode mode = { 1920, 1080, 24 };
+//    sfVideoMode mode = { 1920, 1080, 24 };
     sfContextSettings settings = {};
     settings.antialiasingLevel = 8;
 
@@ -127,9 +127,7 @@ int main(int argc, char **argv) {
         CSFMLHandleInputs(current_input, prev_input);
 
         sfRenderWindow_clear(global_window, sfBlack);
-
         LudumUpdateRender(state, current_input);
-
         sfRenderWindow_display(global_window);
 
         global_running = !current_input->requested_quit;
@@ -138,6 +136,12 @@ int main(int argc, char **argv) {
         sfTime elapsed = sfClock_getElapsedTime(timer);
         current_input->delta_time = sfTime_asSeconds(elapsed);
         sfClock_restart(timer);
+
+        // @Hack: This should only happen for one of the frames because the initial loading of assets
+        // makes the delta time too large meaning it causes the player to jump like 500 units and glitch
+        // through the ground
+        // :)
+        if (current_input->delta_time > 0.2) { current_input->delta_time = 0; }
     }
 
     sfClock_destroy(timer);

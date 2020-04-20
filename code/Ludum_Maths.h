@@ -59,6 +59,11 @@ inline f32 length(v2 a) {
     return a.x + a.y;
 }
 
+inline f32 Length(v2 a) {
+    f32 result = sqrt((a.x * a.x) + (a.y * a.y));
+    return result;
+}
+
 internal v2 &operator+=(v2 &a, v2 b) {
     a = a + b;
     return a;
@@ -106,6 +111,45 @@ internal v3 V3(f32 x, f32 y, f32 z) {
 
 internal b32 Between(f32 value, f32 min, f32 max) {
     b32 result = (value >= min && value <= max);
+    return result;
+}
+
+internal b32 Contains(Bounding_Box *box, v2 point) {
+    b32 result =
+        (point.x >= (box->centre.x - box->half_dim.x)) &&
+        (point.x <= (box->centre.x + box->half_dim.x)) &&
+        (point.y >= (box->centre.y - box->half_dim.y)) &&
+        (point.y <= (box->centre.y + box->half_dim.y));
+
+    return result;
+}
+
+internal b32 Overlaps(Bounding_Box *a, Bounding_Box *b) {
+    v2 centre = a->centre - b->centre;
+    v2 size   = a->half_dim + b->half_dim;
+
+    b32 result = (Abs(centre.x) <= size.x) && (Abs(centre.y) <= size.y);
+    return result;
+}
+
+internal u32 GetSmallestAxis(Bounding_Box *a, Bounding_Box *b) {
+    u32 result = 0;
+
+    v2 centre = a->centre - b->centre;
+    v2 size   = a->half_dim + b->half_dim;
+    if (size.x - Abs(centre.x) < (size.y - Abs(centre.y))) {
+        if (centre.x > 0) { result = 1; }
+    }
+    else {
+        if (centre.y < 0) { result = 2; }
+        else { result = 3; }
+    }
+
+    return result;
+}
+
+internal Bounding_Box CreateBox(v2 centre, v2 half_dim) {
+    Bounding_Box result = { 0, centre, half_dim };
     return result;
 }
 

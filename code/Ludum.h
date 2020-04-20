@@ -2,7 +2,6 @@
 #define LUDUM_H_ 1
 
 #include "Ludum_Types.h"
-#include "Ludum_Maths.h"
 
 enum Direction_Flags {
     Direction_Left   = 0x1,
@@ -33,6 +32,8 @@ struct Bounding_Box {
 
 struct Level_Segment {
     b32 in_use;
+
+    u32 grid[2]; // For reverse positioning
 
     u32 texture_number;
 
@@ -110,61 +111,67 @@ struct Animation {
 };
 
 enum Entity_Type {
+    // @Note: Non-animated entities
     EntityType_Rocks = 0,
+    EntityType_Fireball,
+    EntityType_Raghead,
+    EntityType_Painting,
+
+    // @Note: Animated Entities
     EntityType_Player,
     EntityType_Torch,
+    EntityType_Wind,
 
     EntityType_Count,
 
-    EntityType_Light = 10000 // @Note: This doesn't have a texture so I am just putting it out of the way
-};
-
-struct Entity {
-    u32 type;
-    v2 position;
-    v2 scale;
-
-    Bounding_Box box;
-};
-
-struct Fire_Ball {
-    b32 active;
-    v2 position;
-    v2 velocity;
-    f32 radius;
-    f32 rotation;
-    b32 held;
+    // @Note: These don't have a texture so I am just putting them out of the way for now
+    EntityType_ParticleEmitter = 10000,
+    EntityType_Light = 10001
 };
 
 enum Entity_State_Flags {
     EntityState_OnGround = 0x1,
     EntityState_Falling  = 0x2,
     EntityState_FireballBreak = 0x4,
-    EntityState_HoldingFireball = 0x8
+    EntityState_HoldingFireball = 0x8,
+    EntityState_Active = 0x10,
+    EntityState_Attached = 0x20,
+    EntityState_ReversedPathing = 0x40
 };
 
-struct Player {
-    Entity *entity_handle;
+struct Entity {
+    u32 type;
+
+    u32 flags;
+
     Animation animation;
 
+    v2 position;
     v2 half_dim;
+    v2 scale;
 
+    u32 health;
+
+    v2 velocity;
+
+    // @Entity: Fireball
+    f32 radius;
+    f32 rotation;
+
+    // @Entity: Player
     f32 jump_time;
     f32 fall_time;
     f32 floor_time;
 
-    u32 state_flags;
-
-    b32 holding_fireball;
-    b32 fireball_break;
-
-    v2 position;
-    v2 velocity;
-
-    s8 health;
+    // @Entity: Pathing
+    u32 path_count;
+    v2  path_points[6];
+    u32 next_point;
 };
 
 struct World {
+    v2 segment_dim;
+
     Level_Segment segments[128]; // @Note: 16x8 grid
 
     u32 box_count;
@@ -174,6 +181,8 @@ struct World {
     Entity *entities;
 };
 
+
+// @Todo: Put these into the Entity struct
 struct Particle {
     b32 active;
     v2 position;
@@ -186,6 +195,7 @@ struct Particle {
 struct ParticleSpawner {
     v2 centre;
     v2 half_size;
+
     v2 velocity_min;
     v2 velocity_max;
     v2 size_min;
@@ -210,28 +220,24 @@ struct Logo_State {
 
 struct Play_State {
     b32 initialised;
-    Player player[1];
-
     World world;
 
-    Fire_Ball fire_balls[3];
-
-    Animation torch_animation;
+    Animation entity_animations[EntityType_Count - EntityType_Player];
     Animation candle[3];
-
-    ParticleSpawner rain[1];
-    ParticleSpawner wind[1];
 
     f32 total_time;
     f32 distance_scale;
     sfShader *shader;
 };
 
+// Editor stuff
+//
 struct Edit_Segment {
     b32 in_use;
 
     s32 texture_index;
 
+    // For reverse lookup positioning
     u32 grid_x;
     u32 grid_y;
 
@@ -243,21 +249,31 @@ struct Edit_Segment {
 };
 
 enum Edit_Mode {
+    EditMode_Select,
+    EditMode_Segment,
     EditMode_BoundingBox,
     EditMode_Entity,
-    EditMode_Segment
+    EditMode_Pathing
 };
 
 struct Edit_State {
     b32 initialised;
 
-    v2 displacement;
+    v2 segment_dim;
+    s32 segment_type;
+
+    Entity *pathing_entity;
 
     b32 is_editing;
     v2 first_mouse_down;
 
     Edit_Mode mode;
     s32 entity_type;
+    s32 selected;
+    v2 scale;
+
+    b32 player_placed;
+    Entity player;
 
     Edit_Segment segments[16][8];
     Edit_Segment *current_segment;
@@ -265,12 +281,12 @@ struct Edit_State {
     f32 zoom_factor;
     v2 last_mouse;
     v2 camera_pos;
-    f32 zoom;
-    sfView *edit_view;
+    sfView *view;
 
     v2 entity_scales[EntityType_Count];
     Animation animations[EntityType_Count];
 };
+//
 
 enum Level_Type {
     LevelType_Play,
@@ -292,6 +308,8 @@ struct Game_State {
     b32 initialised;
 
     sfRenderWindow *renderer;
+    sfShader *lighting_shader;
+
     Asset_Manager assets;
 
     sfView *view;
@@ -341,5 +359,7 @@ internal void RemoveFlags(u32 *flags, u32 remove) {
 internal void AddFlags(u32 *flags, u32 add) {
     *flags |= add;
 }
+
+#include "Ludum_Maths.h"
 
 #endif  // LUDUM_H_
