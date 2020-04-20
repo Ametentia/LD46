@@ -85,11 +85,11 @@ internal Animation CreateTorchAnimation(Asset_Manager *assets) {
     return result;
 }
 
-internal Animation CreateWindAnimation(Asset_Manager *assets) {
+internal Animation CreateSpiritAnimation(Asset_Manager *assets) {
     Animation result;
 
     char name[256];
-    snprintf(name, sizeof(name), "Entity%02d", EntityType_Wind);
+    snprintf(name, sizeof(name), "Entity%02d", EntityType_Spirit);
     Asset *asset = GetAsset(assets, name);
     Assert(asset->type == Asset_Texture);
 
@@ -97,4 +97,15 @@ internal Animation CreateWindAnimation(Asset_Manager *assets) {
     return result;
 }
 
+internal Animation CreateTentacleAnimation(Asset_Manager *assets) {
+    Animation result;
 
+    char name[256];
+    snprintf(name, sizeof(name), "Entity%02d", EntityType_Tentacle);
+    Asset *asset = GetAsset(assets, name);
+    Assert(asset->type == Asset_Texture);
+
+    result = CreateAnimationFromTexture(asset->texture, V2(0.5, 0.5), 2, 4, 0.15f);
+
+    return result;
+}

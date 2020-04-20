@@ -32,6 +32,7 @@ typedef sfVector3f v3;
 #define global static
 
 #define cast
+#define ArrayCount(x) (sizeof(x) / sizeof((x)[0]))
 #define Swap(a, b) { auto __temp = a; a = b; b = __temp; }
 #define Assert(exp) do { if (!(exp)) { printf("Assertion :: %s (%s:%d)\n", #exp, __FILE__, __LINE__); asm("int3"); } } while (0)
 

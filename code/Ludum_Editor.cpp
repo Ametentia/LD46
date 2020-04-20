@@ -5,6 +5,11 @@ internal void ConvertToEditor(World *world, Edit_State *edit) {
 
         if (!world_seg->in_use) { continue; }
 
+        seg->in_use = true;
+
+        seg->grid_x = it / 8;
+        seg->grid_y = it % 8;
+
         seg->texture_index = world_seg->texture_number;
         seg->entity_count = world_seg->entity_count;
         seg->box_count    = world_seg->box_count;
@@ -17,7 +22,8 @@ internal void ConvertToEditor(World *world, Edit_State *edit) {
         printf("Seg has %d, %d\n", seg->entity_count, seg->box_count);
     }
 
-    edit->current_segment = &edit->segments[0][6];
+    edit->player_placed = true;
+    edit->player = world->entities[0];
 }
 
 internal void WriteLevelToFile(Game_State *state, Edit_State *edit, const char *level_name) {
@@ -51,6 +57,9 @@ internal void WriteLevelToFile(Game_State *state, Edit_State *edit, const char *
     fwrite(&total_box_count, sizeof(u32), 1, handle);
     fwrite(&total_entity_count, sizeof(u32), 1, handle);
 
+    umm entity_size = sizeof(Entity);
+    fwrite(&entity_size, sizeof(umm), 1, handle);
+
     u32 running_total_entities = 1;
     u32 running_total_boxes = 0;
 
@@ -68,7 +77,6 @@ internal void WriteLevelToFile(Game_State *state, Edit_State *edit, const char *
             else {
                 segment.in_use = true;
                 segment.texture_number = edit_seg->texture_index;
-
 
                 segment.entity_count = edit_seg->entity_count;
                 segment.box_count    = edit_seg->box_count;
@@ -139,7 +147,15 @@ internal void LoadLevelFromFile(Game_State *state, World *world, const char *fil
     world->entity_count = header.total_entity_count;
     world->entities = cast(Entity *) Alloc(world->entity_count * sizeof(Entity));
 
-    fread(world->entities, world->entity_count * sizeof(Entity), 1, handle);
+    umm entity_size = world->entity_count * header.entity_size;
+    u8 *entity_data = cast(u8 *) Alloc(entity_size);
+    fread(entity_data, entity_size, 1, handle);
+
+    for (u32 it = 0; it < world->entity_count; ++it) {
+        CopySize(&world->entities[it], &entity_data[it * header.entity_size], header.entity_size);
+    }
+
+    free(entity_data);
 
     world->box_count = header.total_box_count;
     world->boxes = cast(Bounding_Box *) Alloc(world->box_count * sizeof(Bounding_Box));
@@ -149,10 +165,17 @@ internal void LoadLevelFromFile(Game_State *state, World *world, const char *fil
     fclose(handle);
 }
 
+internal void EditorToWorld(Game_State *state, Edit_State *edit, World *world) {
+    WriteLevelToFile(state, edit, "Temp.aml");
+    LoadLevelFromFile(state, world, "Temp.aml");
+}
+
 internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *input) {
     // Initialisation edit mode
     //
     if (!edit->initialised) {
+        printf("There are %d entity types\n", EntityType_Count);
+
         edit->zoom_factor = 1;
         edit->last_mouse  = V2(0, 0);
         edit->camera_pos  = V2(0, 0);
@@ -198,9 +221,31 @@ internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *
         }
     }
 
+    if (JustPressed(input->f[10])) {
+        World world = {};
+        LoadLevelFromFile(state, &world, "Level.aml");
+
+        ConvertToEditor(&world, edit);
+
+        free(world.entities);
+        free(world.boxes);
+
+        printf("Loaded level successfully\n");
+    }
+
     if (JustPressed(input->f[9])) {
         WriteLevelToFile(state, edit, "Level.aml");
         printf("Successfully wrote to file\n");
+    }
+
+    if (JustPressed(input->f[11])) {
+        Level_State *level_state = CreateLevelState(state, LevelType_Play);
+
+        Play_State *play = &level_state->play;
+
+        play->from_editor = true;
+        EditorToWorld(state, edit, &play->world);
+        return;
     }
 
     // Mouse position in grid space
@@ -474,9 +519,36 @@ internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *
                     next->scale    = edit->scale;
                     next->half_dim = 0.5f * size;
 
+                    if (next->type >= EntityType_Player) {
+                        switch (next->type) {
+                            case EntityType_Player: {
+                                next->animation = CreatePlayerAnimation(&state->assets);
+                            }
+                            break;
+                            case EntityType_Torch: {
+                                next->animation = CreateTorchAnimation(&state->assets);
+                            }
+                            break;
+                            case EntityType_Spirit: {
+                                next->animation = CreateSpiritAnimation(&state->assets);
+                            }
+                            break;
+                            case EntityType_Tentacle: {
+                                next->animation = CreateTentacleAnimation(&state->assets);
+                            }
+                            break;
+                        }
+
+                        next->half_dim  = 0.5f * next->animation.frame_size;
+                        next->half_dim.x *= next->animation.scale.x;
+                        next->half_dim.y *= next->animation.scale.y;
+
+                        next->scale = next->animation.scale;
+                    }
+
                     edit->scale = V2(1, 1);
 
-                    if (next->type == EntityType_Wind || next->type == EntityType_Raghead) {
+                    if (next->type == EntityType_Spirit || next->type == EntityType_Raghead) {
                         edit->mode = EditMode_Pathing;
                         edit->pathing_entity = next;
 
@@ -509,27 +581,10 @@ internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *
                     sfRenderWindow_drawSprite(state->renderer, sprite, 0);
                 }
                 else {
-                    switch (entity->type) {
-                        case EntityType_Player: {
-                            Animation a = CreatePlayerAnimation(&state->assets);
-                            UpdateRenderAnimation(state, &a, entity->position, 0);
-                        }
-                        break;
-                        case EntityType_Torch: {
-                            Animation a = CreateTorchAnimation(&state->assets);
-                            UpdateRenderAnimation(state, &a, entity->position, 0);
-                        }
-
-                        break;
-                        case EntityType_Wind: {
-                            Animation a = CreateWindAnimation(&state->assets);
-                            UpdateRenderAnimation(state, &a, entity->position, 0);
-                        }
-                        break;
-                    }
+                    UpdateRenderAnimation(state, &entity->animation, entity->position, input->delta_time);
                 }
 
-#if 0
+#if 1
                 sfRectangleShape *bbox = sfRectangleShape_create();
                 sfRectangleShape_setFillColor(bbox, sfTransparent);
                 sfRectangleShape_setOutlineColor(bbox, sfRed);
@@ -538,19 +593,6 @@ internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *
                 sfRectangleShape_setPosition(bbox, entity->position);
                 sfRectangleShape_setSize(bbox, 2 * entity->half_dim);
 
-                char name[256];
-                snprintf(name, sizeof(name), "Entity%02d", entity->type);
-                Asset *texture = GetAsset(&state->assets, name);
-
-                sfVector2u sizeu = sfTexture_getSize(texture->texture);
-                v2 size = V2(sizeu.x, sizeu.y);
-
-                sfSprite_setTexture(sprite, texture->texture, false);
-                sfSprite_setOrigin(sprite, 0.5f * size);
-                sfSprite_setScale(sprite, entity->scale);
-                sfSprite_setPosition(sprite, entity->position);
-
-                sfRenderWindow_drawSprite(state->renderer, sprite, 0);
                 sfRenderWindow_drawRectangleShape(state->renderer, bbox, 0);
                 sfRectangleShape_destroy(bbox);
 #endif
@@ -559,6 +601,17 @@ internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *
             if (edit->player_placed) {
                 Animation a = CreatePlayerAnimation(&state->assets);
                 UpdateRenderAnimation(state, &a, edit->player.position, 0);
+
+                sfRectangleShape *bbox = sfRectangleShape_create();
+                sfRectangleShape_setFillColor(bbox, sfTransparent);
+                sfRectangleShape_setOutlineColor(bbox, sfRed);
+                sfRectangleShape_setOutlineThickness(bbox, 1.5);
+                sfRectangleShape_setOrigin(bbox, edit->player.half_dim);
+                sfRectangleShape_setPosition(bbox, edit->player.position);
+                sfRectangleShape_setSize(bbox, 2 * edit->player.half_dim);
+
+                sfRenderWindow_drawRectangleShape(state->renderer, bbox, 0);
+                sfRectangleShape_destroy(bbox);
             }
 
             if (edit->entity_type < EntityType_Player) {
@@ -589,8 +642,13 @@ internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *
                         UpdateRenderAnimation(state, &a, input->mouse_position, 0);
                     }
                     break;
-                    case EntityType_Wind: {
-                        Animation a = CreateWindAnimation(&state->assets);
+                    case EntityType_Spirit: {
+                        Animation a = CreateSpiritAnimation(&state->assets);
+                        UpdateRenderAnimation(state, &a, input->mouse_position, 0);
+                    }
+                    break;
+                    case EntityType_Tentacle: {
+                        Animation a = CreateTentacleAnimation(&state->assets);
                         UpdateRenderAnimation(state, &a, input->mouse_position, 0);
                     }
                     break;
@@ -619,8 +677,8 @@ internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *
                 edit->pathing_entity = 0;
             }
 
-            if (entity->type == EntityType_Wind) {
-                Animation a = CreateWindAnimation(&state->assets);
+            if (entity->type == EntityType_Spirit) {
+                Animation a = CreateSpiritAnimation(&state->assets);
                 UpdateRenderAnimation(state, &a, entity->position, 0);
             }
             else {
@@ -662,7 +720,6 @@ internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *
             v[1].color    = sfRed;
 
             sfRenderWindow_drawPrimitives(state->renderer, v, 2, sfLines, 0);
-
         }
         break;
     }
