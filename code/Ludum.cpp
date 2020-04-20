@@ -294,6 +294,31 @@ internal void UpdateRenderFireBalls(Game_State *state, Play_State *playState, Ga
 
 #endif
 
+internal sfSound *GetSound(Play_State *state, sfSoundBuffer *wanted_buffer) {
+    for(u32 i = 0; i < 16; i++) {
+        sfSound *sound = state->sounds[i];
+        if(!sound) {
+            state->sounds[i] = sfSound_create();
+            sound = state->sounds[i];
+        }
+        const sfSoundBuffer *buffer = sfSound_getBuffer(sound);
+        if(wanted_buffer == buffer) {
+            return sound;
+        }
+    }
+    for(u32 i = 0; i < 16; i++) {
+        sfSound *sound = state->sounds[i];
+        if(!sound) {
+            sound = sfSound_create();
+        }
+        if(sfSound_getStatus(sound) != sfPlaying) {
+            sfSound_setBuffer(sound, wanted_buffer);
+            return sound;
+        }
+    }
+    return 0;
+}
+
 //
 // @LevelState: State code
 //
@@ -326,7 +351,7 @@ internal void MusicHandlerUpdate(Game_State *state, MusicLayers *layers, f32 tim
         layers->play_time = 0;
         Asset *organ = GetAsset(&state->assets, "organ");
         // TODO: Use a settings volume
-        sfMusic_setVolume(organ->music, 5);
+        sfMusic_setVolume(organ->music, 0);
         sfMusic_play(organ->music);
         sfMusic_setLoop(organ->music, true);
     }
@@ -353,7 +378,7 @@ internal void MusicHandlerUpdate(Game_State *state, MusicLayers *layers, f32 tim
             sfSoundStatus soundState = sfMusic_getStatus(asset->music);
             if(soundState == sfStopped && (u32)floor(organTime)%16 == 0) {
                 sfMusic_play(asset->music);
-                sfMusic_setVolume(asset->music, 5);
+                sfMusic_setVolume(asset->music, 0);
                 sfMusic_setLoop(asset->music, true);
                 *tracks[i] = Music_Playing;
             } else if(soundState == sfPlaying && (u32)floor(organTime)%16 == 0) {
@@ -432,19 +457,19 @@ internal void UpdateRenderPlayer(Game_State *state, Play_State *play_state, Game
             RemoveFlags(&player->flags, EntityState_OnGround);
             AddFlags(&player->flags, EntityState_Falling);
 
-            player->velocity.y = -350;
+            player->velocity.y = -450;
             player->jump_time  = 0.3f;
             player->floor_time = 0;
 
             player->animation.pause = false;
         }
         else if (player->jump_time > 0) {
-            player->velocity.y -= 830 * dt;
+            player->velocity.y -= 1230 * dt;
         }
     }
 
     player->velocity.x *= (HasFlags(player->flags, EntityState_OnGround) ? 1 : 0.85);
-    player->velocity.y += (dt * 980);
+    player->velocity.y += (dt * 1300);
     player->position += (dt * player->velocity);
 
     if (JustPressed(input->debug_prev)) {
@@ -479,7 +504,7 @@ internal void UpdateRenderPlayer(Game_State *state, Play_State *play_state, Game
     Asset *noise = GetAsset(&state->assets, "PNoise");
     sfShader_setTextureUniform(state->lighting_shader, "noise", noise->texture);
 
-    f32 light_distance_scale = ((3 - player->health) * 0.08);
+    f32 light_distance_scale = ((3 - player->health) * 0.06);
     v3 colour = { 0.5, 0.5, 1.0 };
     v2 light_position = player->position + offset;
 
@@ -593,6 +618,51 @@ internal void DrawStaticEntity(Game_State *state, Entity *entity) {
     sfRenderWindow_drawSprite(state->renderer, sprite, 0);
 }
 
+internal void UpdateChaseBubbles(Game_State *state, Play_State *playState, Game_Input *input, v2 spawnlines[8]) {
+    f32 dt = input->delta_time;
+    for(u32 i = 0; i < 2000; i++) {
+        Chase_Bubble *bubble = playState->chase_bubbles[i];
+        if(!bubble->active) {
+            bubble->active = true;
+            u32 offset = (u32)floor(i/500)*2;
+            v2 dir = spawnlines[0 + offset] - spawnlines[1 + offset];
+            f32 len = Length(dir); 
+            v2 spawnpoint = spawnlines[0] - (dir * cast (f32) (1.0/sqrt(len)) * random(0, len));
+            bubble->position = spawnpoint;
+            bubble->radius = random(60, 90);
+        }
+        bubble->position += V2(random(-3, 3)*dt, random(-3, 3)*dt);
+        bubble->radius -= random(50, 60)*dt;
+        if(bubble->radius < 10) {
+            bubble->active = false;
+            continue;
+        }
+        sfCircleShape *r = sfCircleShape_create();
+        sfCircleShape_setOrigin(r, V2(bubble->radius + 1, bubble->radius + 1));
+        sfCircleShape_setRadius(r, bubble->radius + 1);
+        sfColor boarderColour = {
+               67,
+               23,
+               16,
+               255
+        };
+        sfCircleShape_setPosition(r, bubble->position);
+        sfCircleShape_setFillColor(r, boarderColour);
+        sfRenderWindow_drawCircleShape(state->renderer, r, 0);
+        sfCircleShape_destroy(r);
+    }
+    for(u32 i = 0; i < 2000; i++) {
+        Chase_Bubble *bubble = playState->chase_bubbles[i];
+        sfCircleShape *r = sfCircleShape_create();
+        sfCircleShape_setOrigin(r, V2(bubble->radius, bubble->radius));
+        sfCircleShape_setRadius(r, bubble->radius);
+        sfCircleShape_setPosition(r, bubble->position);
+        sfCircleShape_setFillColor(r, sfBlack);
+        sfRenderWindow_drawCircleShape(state->renderer, r, 0);
+        sfCircleShape_destroy(r);
+    }
+}
+
 internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Game_Input *input) {
     World *world = &playState->world;
 
@@ -632,6 +702,14 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
         playState->candle[0] = CreateAnimationFromTexture(candle_low->texture,    V2(0.16, 0.16), 1, 3, 0.08f);
         playState->candle[1] = CreateAnimationFromTexture(candle_medium->texture, V2(0.16, 0.16), 1, 3, 0.08f);
         playState->candle[2] = CreateAnimationFromTexture(candle_high->texture,   V2(0.16, 0.16), 1, 3, 0.08f);
+        MusicLayers *music = &playState->music[0];
+        music->drums = Music_Request;
+        music->hat = Music_Request;
+        music->arpeggio = Music_Request;
+
+        for(u32 i = 0; i < 2000; i++) {
+            playState->chase_bubbles[i] = cast(Chase_Bubble *) Alloc(sizeof(Chase_Bubble));
+        }
 
         playState->initialised = true;
     }
@@ -683,10 +761,6 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                 }
                 break;
                 case EntityType_Raghead: {
-                    // @Todo: Vary position based on pathing
-                    //
-
-
                     v2 dir = entity->path_points[entity->next_point] - entity->position;
                     f32 len = Length(dir);
                     if (len < 0.5) {
@@ -713,6 +787,17 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                     }
 
                     DrawStaticEntity(state, entity);
+                    f32 pLength = Length(player->position - entity->position);
+                    if(pLength - 400 < 5) {
+                        Asset *rag_sound = GetAsset(&state->assets, "SackSound");
+                        sfSound *sound = GetSound(playState, rag_sound->sound);
+                        Assert(sound);
+                        sfSoundStatus soundState = sfSound_getStatus(sound); 
+                        if(soundState != sfPlaying) {
+                            sfSound_setVolume(sound, 15);
+                            sfSound_play(sound);
+                        }
+                    }
                 }
                 break;
                 case EntityType_Wind: {
@@ -734,12 +819,74 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                     UpdateRenderAnimation(state, &entity->animation, entity->position, dt);
                 }
                 break;
+                case EntityType_DarkWall: {
+                    if(HasFlags(entity->flags, EntityState_Active)) {
+                        /* @TODO Matt: When the screen is activated run this
+                        v2 dir = playState->player_spawn - player->position;
+                        f32 len = length(dir);
+                        entity->location = view_size.x/2 * dir * (1/sqrt(len));
+                        */
+
+                        entity->half_dim += V2(200, 200) * dt;
+                        Bounding_Box player_box = CreateBox(player->position, player->half_dim);
+                        Bounding_Box wall_box = CreateBox(entity->position, entity->half_dim);
+                        if(Overlaps(&wall_box, &player_box)) {
+                            // TODO : Player dead!
+                            Assert(false);
+                        }
+                        v2 pos = entity->position;
+                        v2 size = entity->half_dim;
+                        v2 line[8] = {
+                            V2(pos.x+size.x, pos.y+size.y),
+                            V2(pos.x+size.x, pos.y-size.y),
+                            V2(pos.x-size.x, pos.y-size.y),
+                            V2(pos.x-size.x, pos.y+size.y),
+                            V2(pos.x-size.x, pos.y+size.y),
+                            V2(pos.x+size.x, pos.y+size.y),
+                            V2(pos.x+size.x, pos.y-size.y),
+                            V2(pos.x-size.x, pos.y-size.y),
+                        };
+                        sfRectangleShape *dis_rect = sfRectangleShape_create();
+                        sfRectangleShape_setPosition(dis_rect, entity->position);
+                        sfRectangleShape_setTexture(dis_rect, GetAsset(&state->assets,"logo")->texture, false);
+                        sfRectangleShape_setSize(dis_rect, entity->half_dim*2);
+                        sfRectangleShape_setOrigin(dis_rect, entity->half_dim);
+                        sfColor rect_col = {0,0,0,255};
+                        sfRectangleShape_setFillColor(dis_rect, rect_col);
+                        sfRenderWindow_drawRectangleShape(state->renderer, dis_rect, NULL);
+                        sfRectangleShape_destroy(dis_rect);
+                        UpdateChaseBubbles(state, playState, input, line);
+                    } else if(Length(entity->half_dim) > 1){
+                        entity->half_dim -= V2(500, 500) * dt;
+                        v2 pos = entity->position;
+                        v2 size = entity->half_dim;
+                        v2 line[8] = {
+                            V2(pos.x+size.x, pos.y+size.y),
+                            V2(pos.x+size.x, pos.y-size.y),
+                            V2(pos.x-size.x, pos.y-size.y),
+                            V2(pos.x-size.x, pos.y+size.y),
+                            V2(pos.x-size.x, pos.y+size.y),
+                            V2(pos.x+size.x, pos.y+size.y),
+                            V2(pos.x+size.x, pos.y-size.y),
+                            V2(pos.x-size.x, pos.y-size.y),
+                        };
+                        sfRectangleShape *dis_rect = sfRectangleShape_create();
+                        sfRectangleShape_setPosition(dis_rect, entity->position);
+                        sfRectangleShape_setTexture(dis_rect, GetAsset(&state->assets,"logo")->texture, false);
+                        sfRectangleShape_setSize(dis_rect, entity->half_dim*2);
+                        sfRectangleShape_setOrigin(dis_rect, entity->half_dim);
+                        sfColor rect_col = {0,0,0,255};
+                        sfRectangleShape_setFillColor(dis_rect, rect_col);
+                        sfRenderWindow_drawRectangleShape(state->renderer, dis_rect, NULL);
+                        sfRectangleShape_destroy(dis_rect);
+                        UpdateChaseBubbles(state, playState, input, line);
+                    }
+                }
             }
         }
     }
 
     UpdateRenderPlayer(state, playState, input, player);
-
     sfShader_bind(0);
 
     // @Todo: Reenable UpdateRenderFireBalls(state, playState, input);
@@ -934,6 +1081,9 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
         LoadAsset(&state->assets, "arpeggio", Asset_Music);
         LoadAsset(&state->assets, "drums", Asset_Music);
         LoadAsset(&state->assets, "hat", Asset_Music);
+
+        // Sounds
+        LoadAsset(&state->assets, "SackSound", Asset_Sound);
 
         // Fonts
         LoadAsset(&state->assets, "ubuntu", Asset_Font);
