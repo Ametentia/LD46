@@ -78,6 +78,12 @@ enum Music_State {
     Music_Playing
 };
 
+struct Chase_Bubble {
+    b32 active;
+    f32 radius;
+    v2 position;
+};
+
 struct MusicLayers {
     b32 initialised;
     f32 play_time;
@@ -144,6 +150,7 @@ enum Entity_Type {
     EntityType_Statue    = 9,
     EntityType_Wind      = 10,
 
+    EntityType_DarkWall,
     // @Note: Animated Entities
     EntityType_Player    = 11,
     EntityType_Torch     = 12,
@@ -279,6 +286,9 @@ struct Play_State {
     Animation entity_animations[EntityType_Count - EntityType_Player];
     Animation candle[3];
     MusicLayers music[1];
+    sfSound *sounds[16];
+    Chase_Bubble *chase_bubbles[2000];
+    v2 player_spawn;
 
     u32 light_count;
     v2 light_positions[MAX_LIGHTS];
