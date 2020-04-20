@@ -1010,6 +1010,10 @@ internal void UpdateRenderCredits(Game_State *state, Credits_State *credits, Gam
     if(!credits->initialised) {
         credits->initialised = true;
     }
+    v2 mouse_pos = input->mouse_position;
+    Bounding_Box mouse = {};
+    mouse.centre = mouse_pos;
+    mouse.half_dim = V2(2, 2);
     sfFont *font = GetAsset(&state->assets, "ubuntu")->font;
     sfText *text = sfText_create();
     sfText_setFont(text, font);
@@ -1017,11 +1021,59 @@ internal void UpdateRenderCredits(Game_State *state, Credits_State *credits, Gam
 
     sfText_setString(text, "Back To Menu");
     sfFloatRect bounds = sfText_getLocalBounds(text);
+    Bounding_Box *b1 = &credits->buttons[0];
+    b1->centre = V2(view_size.x - bounds.width/2 - 20, view_size.y - 20);
+    b1->half_dim = V2(bounds.width/2, bounds.height/2);
+    sfText_setColor(text, sfWhite);
+    if(Overlaps(b1, &mouse)) {
+        sfText_setColor(text, sfRed);
+        if (WasPressed(input->mouse_buttons[0])) {
+            free(RemoveLevelState(state));
+        }
+    }
+
+    sfText_setOrigin(text, V2(0, 0));
+    sfText_setPosition(text, V2(view_size.x - bounds.width - 20, view_size.y - bounds.height - 20));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+
+
+    sfText_setString(text, "James Bulman: Programming");
+    bounds = sfText_getLocalBounds(text);
     sfText_setColor(text, sfWhite);
 
     sfText_setOrigin(text, V2(0, 0));
-    sfText_setPosition(text, V2(bounds.width-bounds.width - 10, bounds.height - 10));
+    sfText_setPosition(text, V2(20, view_size.y/2 - bounds.height - 20));
     sfRenderWindow_drawText(state->renderer, text, 0);
+
+    sfText_setString(text, "Cameron Thronton: Art");
+    sfText_setColor(text, sfWhite);
+
+    sfText_setOrigin(text, V2(0, 0));
+    sfText_setPosition(text, V2(20, view_size.y/2));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+
+    sfText_setString(text, "Alex Goldsack: Music");
+    sfText_setColor(text, sfWhite);
+
+    sfText_setOrigin(text, V2(0, 0));
+    sfText_setPosition(text, V2(20, view_size.y/2 + bounds.height + 20));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+
+    sfText_setString(text, "Matt Threlfall: Programming and Bugs");
+    sfText_setColor(text, sfWhite);
+
+    sfText_setOrigin(text, V2(0, 0));
+    sfText_setPosition(text, V2(20, view_size.y/2 + bounds.height*2 + 40));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+
+    sfText_setColor(text, sfWhite);
+    sfText_setString(text, "Credits");
+    sfText_setCharacterSize(text, 72);
+    bounds = sfText_getLocalBounds(text);
+    sfText_setOrigin(text, V2(bounds.width / 2, bounds.height / 2));
+    sfText_setPosition(text, V2(view_size.x/2, view_size.y/10));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+    sfText_destroy(text);
 }
 
 internal void UpdateRenderMenu(Game_State *state, Menu_State *menu, Game_Input *input) {
@@ -1035,7 +1087,6 @@ internal void UpdateRenderMenu(Game_State *state, Menu_State *menu, Game_Input *
     Bounding_Box mouse = {};
     mouse.centre = mouse_pos;
     mouse.half_dim = V2(2, 2);
-
 
     sfFont *font = GetAsset(&state->assets, "ubuntu")->font;
     sfText *text = sfText_create();
@@ -1071,7 +1122,7 @@ internal void UpdateRenderMenu(Game_State *state, Menu_State *menu, Game_Input *
     if(Overlaps(b1, &mouse)) {
         sfText_setColor(text, sfRed);
         if (WasPressed(input->mouse_buttons[0])) {
-            CreateLevelState(state, LevelType_Logo);
+            CreateLevelState(state, LevelType_Credits);
         }
     }
 
@@ -1099,7 +1150,7 @@ internal void UpdateRenderMenu(Game_State *state, Menu_State *menu, Game_Input *
     sfRenderWindow_drawText(state->renderer, text, 0);
 
     sfText_setColor(text, sfWhite);
-    sfText_setString(text, "Candle Light");
+    sfText_setString(text, "Candle Fright");
     sfText_setCharacterSize(text, 72);
     bounds = sfText_getLocalBounds(text);
     sfText_setOrigin(text, V2(bounds.width / 2, bounds.height / 2));
