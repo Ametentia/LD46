@@ -46,8 +46,6 @@ internal void ConvertToEditor(Game_State *state, World *world, Edit_State *edit)
         }
 
         CopySize(seg->boxes, &world->boxes[world_seg->box_range_start], seg->box_count * sizeof(Bounding_Box));
-
-        printf("Seg has %d, %d\n", seg->entity_count, seg->box_count);
     }
 
     edit->player_placed = true;

@@ -9,15 +9,12 @@ internal v2 V2(f32 x, f32 y) {
 }
 
 inline s32 random(s32 min, s32 max) {
-    if(min == max) { return min; }
 	return (rand() % (min - max)) + min;
 }
 
 inline v2 random(v2 min, v2 max) {
-    f32 choice_x = random(min.x, max.x);
-    f32 choice_y = random(min.y, max.y);
-    v2 choice = V2(choice_x, choice_y);
-	return choice;
+    v2 result = V2(random(min.x, max.x), random(min.y, max.y));
+	return result;
 }
 
 internal v2 V2(sfVector2u v) {

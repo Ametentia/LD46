@@ -372,12 +372,20 @@ struct Edit_State {
 };
 //
 
+struct Game_Over_State {
+    b32 inti;
+    b32 died;
+    const char *message;
+    const char *submessage;
+};
+
 enum Level_Type {
     LevelType_Play,
     LevelType_Logo,
     LevelType_Edit,
     LevelType_Menu,
-    LevelType_Credits
+    LevelType_Credits,
+    LevelType_GameOver
 };
 
 struct Level_State {
@@ -388,6 +396,7 @@ struct Level_State {
         Edit_State edit;
         Menu_State menu;
         Credits_State credits;
+        Game_Over_State over;
     };
     Level_State *next;
 };

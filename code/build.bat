@@ -1,6 +1,6 @@
 @echo off
 
-set CompilerFlags=-O0 -g -gcodeview -isystem ../libs/CSFML/include -DLUDUM_WINDOWS=1
+set CompilerFlags=-O2 -g -gcodeview -isystem ../libs/CSFML/include -DLUDUM_WINDOWS=1
 set LinkerFlags=-L../libs/CSFML/lib -lcsfml-audio -lcsfml-graphics -lcsfml-window -lcsfml-system
 
 IF NOT EXIST "..\build" (mkdir "..\build")

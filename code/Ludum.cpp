@@ -460,6 +460,8 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
         player->velocity = V2(0, 0);
         Assert(player->type == EntityType_Player);
 
+        playState->last_checkpoint = player->position;
+
         player->animation = CreatePlayerAnimation(&state->assets);
         player->health    = 3;
 
@@ -574,7 +576,10 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                 break;
                 case EntityType_Statue: {
                     Bounding_Box player_box = CreateBox(player->position, player->half_dim);
-                    Bounding_Box statue_box = CreateBox(entity->position, entity->half_dim);
+
+                    v2 statue_dim = V2(entity->half_dim.x * 4, entity->half_dim.y);
+                    Bounding_Box statue_box = CreateBox(entity->position, statue_dim);
+
                     if (Overlaps(&player_box, &statue_box)) {
                         Entity *e = GetNextScratchEntity(world);
                         e->type = EntityType_DarkWall;
@@ -600,9 +605,19 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                         Bounding_Box player_box = CreateBox(player->position, player->half_dim);
 
                         if (JustPressed(controller->interact)) {
+                            player->health = 3;
+                            playState->last_checkpoint = entity->position;
+
                             if (Overlaps(&torch_box, &player_box)) {
                                 RemoveFlags(&entity->flags, EntityState_Unchecked);
                                 AddFlags(&entity->flags, EntityState_Lit);
+                            }
+
+                            for (u32 a = 0; a < ArrayCount(world->scratch_entities); ++a) {
+                                Entity *e = &world->scratch_entities[a];
+                                if (e->type == EntityType_DarkWall) {
+                                    RemoveFlags(&e->flags, EntityState_Active);
+                                }
                             }
                         }
                     }
@@ -626,6 +641,12 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
 
                                 playState->goals_activated += 1;
                                 if (playState->goals_activated == 4) {
+                                    Level_State *over = CreateLevelState(state, LevelType_GameOver);
+                                    Game_Over_State *overover = &over->over;
+                                    overover->message = "You Won!";
+                                    overover->submessage = "Press space to close the game!";
+
+                                    return;
                                 }
                             }
                         }
@@ -751,14 +772,26 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
             }
             break;
             case EntityType_DarkWall: {
+                sfShader_bind(0);
                 if(HasFlags(entity->flags, EntityState_Active)) {
 
                     entity->half_dim += V2(75, 75) * dt;
                     Bounding_Box player_box = CreateBox(player->position, player->half_dim);
                     Bounding_Box wall_box = CreateBox(entity->position, entity->half_dim);
                     if(Overlaps(&wall_box, &player_box)) {
-                        // TODO : Player dead!
-                        Assert(false);
+
+                        entity->type = EntityType_Barrel;
+                        RemoveFlags(&entity->flags, EntityState_Active);
+
+                        player->position = playState->last_checkpoint;
+
+                        Level_State *over = CreateLevelState(state, LevelType_GameOver);
+                        Game_Over_State *overover = &over->over;
+                        overover->message = "You Died!";
+                        overover->submessage = "Press space to respawn at last checkpoint!";
+                        overover->died = true;
+
+                        return;
                     }
                     v2 pos = entity->position;
                     v2 size = entity->half_dim;
@@ -811,6 +844,13 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                     sfRenderWindow_drawRectangleShape(state->renderer, dis_rect, NULL);
                     sfRectangleShape_destroy(dis_rect);
                     UpdateChaseBubbles(state, playState, input, line);
+                }
+
+                if (player->health != 0 || playState->current_segment_light_count > 0) {
+                    sfShader_bind(state->diffuse_shader);
+                }
+                else {
+                    sfShader_bind(state->ambient_shader);
                 }
             }
             break;
@@ -1072,13 +1112,60 @@ internal void UpdateRenderLogoState(Game_State *state, Logo_State *logo, Game_In
     }
 }
 
+internal void UpdateRenderGameOver(Game_State *state, Game_Over_State *over, Game_Input *input) {
+    if (!over->inti) {
+        sfFloatRect rect;
+        rect.top = 0;
+        rect.left = 0;
+        rect.width = 1280;
+        rect.height = 720;
+        sfView_reset(state->view, rect);
+
+        sfView_setCenter(state->view, V2(640, 360));
+        sfView_setSize(state->view, V2(1280, 720));
+
+        sfRenderWindow_setView(state->renderer, state->view);
+
+        printf("KLFJD:LKSFJ;kl\n");
+
+        over->inti = true;
+    }
+
+    Asset *font = GetAsset(&state->assets, "ubuntu");
+
+    sfShader_bind(0);
+
+    v2 view_size = sfView_getSize(state->view);
+
+    sfText *text = sfText_create();
+
+
+    sfText_setColor(text, sfWhite);
+    sfText_setFillColor(text, sfWhite);
+    sfText_setString(text, over->message);
+    sfText_setCharacterSize(text, 72);
+
+
+    Game_Controller *controller = &input->controllers[0];
+
+    sfFloatRect bounds = sfText_getLocalBounds(text);
+    sfText_setOrigin(text, V2(bounds.width / 2, bounds.height / 2));
+    sfText_setPosition(text, V2(view_size.x/2, view_size.y/10));
+    sfRenderWindow_drawText(state->renderer, text, 0);
+
+    sfText_destroy(text);
+
+    if (JustPressed(controller->jump)) {
+        exit(1);
+    }
+}
+
 internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
     if (!state->initialised) {
         CreateLevelState(state, LevelType_Edit);
-        //CreateLevelState(state, LevelType_Play);
-        // TODO RELEASE: Enable logo
         CreateLevelState(state, LevelType_Menu);
-        //CreateLevelState(state, LevelType_Logo);
+        CreateLevelState(state, LevelType_Logo);
+        // TODO RELEASE: Enable logo
 
         InitAssets(&state->assets, 64);
 
@@ -1223,6 +1310,11 @@ internal void LudumUpdateRender(Game_State *state, Game_Input *input) {
         case LevelType_Credits: {
             Credits_State *credits = &current_state->credits;
             UpdateRenderCredits(state, credits, input);
+        }
+        break;
+        case LevelType_GameOver: {
+            Game_Over_State *over = &current_state->over;
+            UpdateRenderGameOver(state, over, input);
         }
         break;
     }
