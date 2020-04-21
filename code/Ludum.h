@@ -297,8 +297,11 @@ struct Play_State {
     Animation candle[3];
     MusicLayers music[1];
     sfSound *sounds[16];
-    Chase_Bubble *chase_bubbles[2000];
+    Chase_Bubble chase_bubbles[1000];
     v2 player_spawn;
+
+    v2 last_checkpoint;
+    u32 goals_activated;
 
     u32 current_segment_light_count;
     u32 light_count;

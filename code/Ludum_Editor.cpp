@@ -1,4 +1,4 @@
-internal void ConvertToEditor(World *world, Edit_State *edit) {
+internal void ConvertToEditor(Game_State *state, World *world, Edit_State *edit) {
     for (u32 it = 0; it < 128; ++it) {
         Edit_Segment *seg = &edit->segments[it / 8][it % 8];
         Level_Segment *world_seg = &world->segments[it];
@@ -16,6 +16,34 @@ internal void ConvertToEditor(World *world, Edit_State *edit) {
 
         CopySize(seg->entities, &world->entities[world_seg->entity_range_start],
                 seg->entity_count * sizeof(Entity));
+
+        for (u32 e = 0; e < seg->entity_count; ++e) {
+            Entity *en = &seg->entities[e];
+
+            if (en->type >= EntityType_Player && en->type < EntityType_Count) {
+                switch (en->type) {
+                    case EntityType_Player: {
+                        en->animation = CreatePlayerAnimation(&state->assets);
+                    }
+                    break;
+                    case EntityType_Torch: {
+                        en->animation = CreateTorchAnimation(&state->assets);
+                    }
+                    break;
+                    case EntityType_Spirit: {
+                        en->animation = CreateSpiritAnimation(&state->assets);
+                    }
+                    break;
+                    case EntityType_Tentacle: {
+                        en->animation = CreateTentacleAnimation(&state->assets);
+                    }
+                    break;
+                    case EntityType_Goal: {
+                        en->animation = CreateGoalAnimation(&state->assets);
+                    }
+                }
+            }
+        }
 
         CopySize(seg->boxes, &world->boxes[world_seg->box_range_start], seg->box_count * sizeof(Bounding_Box));
 
@@ -226,7 +254,7 @@ internal void UpdateRenderEdit(Game_State *state, Edit_State *edit, Game_Input *
         World world = {};
         LoadLevelFromFile(state, &world, "Level.aml");
 
-        ConvertToEditor(&world, edit);
+        ConvertToEditor(state, &world, edit);
 
         free(world.entities);
         free(world.boxes);

@@ -413,47 +413,39 @@ internal void DrawStaticEntity(Game_State *state, Entity *entity) {
 
 internal void UpdateChaseBubbles(Game_State *state, Play_State *playState, Game_Input *input, v2 spawnlines[8]) {
     f32 dt = input->delta_time;
+
+    sfCircleShape *r = sfCircleShape_create();
+    sfColor boarderColour = { 67, 23, 16, 255 };
+    sfCircleShape_setOutlineColor(r, boarderColour);
+    sfCircleShape_setOutlineThickness(r, 2);
+    sfCircleShape_setFillColor(r, sfBlack);
+
     for(u32 i = 0; i < 1000; i++) {
-        Chase_Bubble *bubble = playState->chase_bubbles[i];
+        Chase_Bubble *bubble = &playState->chase_bubbles[i];
         if(!bubble->active) {
             bubble->active = true;
-            u32 offset = (u32)floor(i/250)*2;
+            u32 offset = ((u32)(i / 250)) * 2;
             v2 dir = spawnlines[0 + offset] - spawnlines[1 + offset];
             f32 len = Length(dir);
             v2 spawnpoint = spawnlines[0 + offset] - (dir * cast (f32) (1.0/len) * random(0, len));
             bubble->position = spawnpoint;
             bubble->radius = random(50, 60);
         }
+
         bubble->position += V2(random(-3, 3)*dt, random(-3, 3)*dt);
         bubble->radius -= random(40, 50)*dt;
         if(bubble->radius < 15) {
             bubble->active = false;
             continue;
         }
-        sfCircleShape *r = sfCircleShape_create();
-        sfCircleShape_setOrigin(r, V2(bubble->radius + 1, bubble->radius + 1));
-        sfCircleShape_setRadius(r, bubble->radius + 1);
-        sfColor boarderColour = {
-               67,
-               23,
-               16,
-               255
-        };
-        sfCircleShape_setPosition(r, bubble->position);
-        sfCircleShape_setFillColor(r, boarderColour);
-        sfRenderWindow_drawCircleShape(state->renderer, r, 0);
-        sfCircleShape_destroy(r);
-    }
-    for(u32 i = 0; i < 1000; i++) {
-        Chase_Bubble *bubble = playState->chase_bubbles[i];
-        sfCircleShape *r = sfCircleShape_create();
+
         sfCircleShape_setOrigin(r, V2(bubble->radius, bubble->radius));
         sfCircleShape_setRadius(r, bubble->radius);
         sfCircleShape_setPosition(r, bubble->position);
-        sfCircleShape_setFillColor(r, sfBlack);
         sfRenderWindow_drawCircleShape(state->renderer, r, 0);
-        sfCircleShape_destroy(r);
     }
+
+    sfCircleShape_destroy(r);
 }
 
 internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Game_Input *input) {
@@ -508,14 +500,12 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
         playState->candle[1] = CreateAnimationFromTexture(candle_medium->texture, V2(0.16, 0.16), 1, 3, 0.08f);
         playState->candle[2] = CreateAnimationFromTexture(candle_high->texture,   V2(0.16, 0.16), 1, 3, 0.08f);
         playState->player_spawn = player->position;
+
         MusicLayers *music = &playState->music[0];
+
         music->drums = Music_Request;
         music->hat = Music_Request;
         music->arpeggio = Music_Request;
-
-        for(u32 i = 0; i < 2000; i++) {
-            playState->chase_bubbles[i] = cast(Chase_Bubble *) Alloc(sizeof(Chase_Bubble));
-        }
 
         playState->initialised = true;
     }
@@ -583,7 +573,21 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                 }
                 break;
                 case EntityType_Statue: {
-                    // @Todo: Start chase when player gets within range
+                    Bounding_Box player_box = CreateBox(player->position, player->half_dim);
+                    Bounding_Box statue_box = CreateBox(entity->position, entity->half_dim);
+                    if (Overlaps(&player_box, &statue_box)) {
+                        Entity *e = GetNextScratchEntity(world);
+                        e->type = EntityType_DarkWall;
+                        e->half_dim = V2(10,10);
+
+                        AddFlags(&e->flags, EntityState_Active);
+
+                        v2 dir = playState->player_spawn - player->position;
+
+                        f32 len = Length(dir);
+                        e->position = entity->position;
+                    }
+
                     DrawStaticEntity(state, entity);
                 }
                 break;
@@ -619,6 +623,10 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                             if (Overlaps(&torch_box, &player_box)) {
                                 RemoveFlags(&entity->flags, EntityState_Unchecked);
                                 AddFlags(&entity->flags, EntityState_Lit);
+
+                                playState->goals_activated += 1;
+                                if (playState->goals_activated == 4) {
+                                }
                             }
                         }
                     }
@@ -860,14 +868,6 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
     sfShader_bind(0);
 
     if(JustPressed(controller->interact)) {
-        Entity *e = GetNextScratchEntity(world);
-        e->type = EntityType_DarkWall;
-        e->half_dim = V2(10,10);
-        AddFlags(&e->flags, EntityState_Active);
-        v2 dir = playState->player_spawn - player->position;
-        f32 len = Length(dir);
-        e->position = player->position - view_size.x * dir * (1/len);
-        printf("Spawned\n");
     }
 
     // @Todo: Reenable UpdateRenderFireBalls(state, playState, input);
