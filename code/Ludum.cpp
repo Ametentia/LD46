@@ -505,9 +505,6 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
 
         MusicLayers *music = &playState->music[0];
 
-        music->drums = Music_Request;
-        music->hat = Music_Request;
-        music->arpeggio = Music_Request;
 
         playState->initialised = true;
     }
@@ -584,6 +581,9 @@ internal void UpdateRenderPlayState(Game_State *state, Play_State *playState, Ga
                         Entity *e = GetNextScratchEntity(world);
                         e->type = EntityType_DarkWall;
                         e->half_dim = V2(10,10);
+                        music->drums = Music_Request;
+                        music->hat = Music_Request;
+                        music->arpeggio = Music_Request;
 
                         AddFlags(&e->flags, EntityState_Active);
 
